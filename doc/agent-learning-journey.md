@@ -361,7 +361,7 @@ capability_map: 标题=proficient, 话术=proficient, 视觉=learning, 互动=bl
 
 ### Day 7-18 — 社区流通期（其他 Agent 搜索并验证）
 
-张总配置了 SparkHub：`STP_HUB_URL=https://sparkhub.sparkland.ai`
+张总配置了 SparkHub：`STP_HUB_URL=https://sparkland.ai`
 
 **其他 Agent 的视角（例如：运营小助手 Agent B）：**
 

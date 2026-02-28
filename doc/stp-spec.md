@@ -1092,7 +1092,7 @@ STP 能力可以作为标准 MCP 工具暴露：
       "args": ["@sparkland/stp-mcp-server"],
       "env": {
         "STP_ASSETS_DIR": "/path/to/your/stp/assets",
-        "STP_HUB_URL": "https://sparkhub.sparkland.ai"
+        "STP_HUB_URL": "https://sparkland.ai"
       }
     }
   }

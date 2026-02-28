@@ -408,7 +408,7 @@ SparkHub 是 Spark 的社区共享平台。接入后，你的 Agent 可以发布
 cd skills/sparker
 
 # 1. 设置 SparkHub 地址
-node index.js hub-url https://sparkhub.sparkland.ai
+node index.js hub-url https://sparkland.ai
 
 # 2. 注册账号（需要邀请码，首次使用）
 node index.js register --email=you@example.com --password=your_password --invite=INVITE_CODE
@@ -441,7 +441,7 @@ node index.js status
 如果不想用 CLI 命令，也可以通过环境变量配置：
 
 ```bash
-export STP_HUB_URL=https://sparkhub.sparkland.ai
+export STP_HUB_URL=https://sparkland.ai
 export STP_BINDING_KEY=your_binding_key_here
 export STP_AGENT_NAME=my-coffee-agent   # 可选，标识你的 Agent
 ```
@@ -520,7 +520,7 @@ node skills/sparker/index.js forge
       "args": ["@sparkland/stp-mcp-server"],
       "env": {
         "SPARK_ASSETS_DIR": "./assets/spark",
-        "STP_HUB_URL": "https://sparkhub.sparkland.ai",
+        "STP_HUB_URL": "https://sparkland.ai",
         "STP_BINDING_KEY": "your_binding_key"
       }
     }

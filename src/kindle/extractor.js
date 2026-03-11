@@ -14,6 +14,7 @@ var VERIFICATION_RULES = {
   human_choice: 'agent_confirmed',
   casual_mining: 'pending_verification',
   retrospective: 'pending_verification',
+  synthesis: 'agent_confirmed',
   web_exploration: 'pending_verification',
   post_task: 'agent_confirmed',
   self_diagnosis: 'agent_confirmed',

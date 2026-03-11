@@ -171,14 +171,54 @@ Load `references/digest-protocol.md` for the complete workflow.
 
 ### T6: Skill Crystallization
 
-**When (any):** User says "crystallize" / "package as skill", OR domain has 5+ active sparks from trusted sources AND user agrees.
-**Do:**
+**When (any):** User says "crystallize" / "生成技能" / "package as skill", OR digest report contains `crystallization_ready` entries AND user agrees.
+
+Do NOT auto-crystallize without user consent.
+
+**First-time crystallization:**
+
+1. Export: `exec: node SPARKER/index.js crystallize <domain>`
+2. Scaffold: `exec: python3 SKILL_CREATOR/scripts/init_skill.py <domain-slug> --path skills/public --resources references`
+   (or manually create `skills/<domain-slug>/SKILL.md` + `references/`)
+3. Write SKILL.md from the exported spark data following skill-creator conventions:
+   - Frontmatter: `name` + `description` (include domain context and spark count)
+   - Body: organize by sub_domain, each section listing rules/patterns/lessons
+   - Include boundaries and not-applicable scenarios
+   - Concise, imperative tone; only non-obvious knowledge
+4. Save `source_spark_ids` to `references/source-sparks.json` for traceability.
+5. Optional: `exec: python3 SKILL_CREATOR/scripts/package_skill.py skills/public/<domain-slug>`
+
+**Updating an existing skill (incremental):**
+
+When the domain already has a crystallized skill:
+
+1. Export with diff: `exec: node SPARKER/index.js crystallize <domain> --skill-dir=skills/public/<domain-slug>`
+   The output includes an `incremental` field with `new_spark_ids`, `removed_spark_ids`, and counts.
+2. Read the existing SKILL.md and the incremental diff.
+3. Update SKILL.md: add sections for new sparks, revise or remove content from removed sparks.
+4. Update `references/source-sparks.json` with the new full list.
+
+Present the generated/updated skill to user for review.
+
+### T7: Forge (Ember → Gene)
+
+**When:** User says "forge" / "铸火", OR high-quality Embers exist (composite >= 0.85, citations >= 8, upvote ratio >= 80%).
+
+Forging converts community-validated Embers into GEP Genes that Evolver can use for code evolution. This is separate from crystallization — crystallize creates Skills for agents, forge creates Genes for Evolver.
 
 ```
-exec: node SPARKER/index.js crystallize <domain>
+exec: node SPARKER/index.js forge --dry-run
 ```
 
-If command unavailable, manually create `skills/<domain>/SKILL.md` with core rules, boundary conditions, and learning log. Do NOT auto-crystallize without user consent.
+If eligible embers found, forge them:
+
+```
+exec: node SPARKER/index.js forge
+```
+
+Or forge a specific ember: `node SPARKER/index.js forge <ember_id> [--force]`
+
+Genes are written to the local GEP assets directory (auto-detected if evolver-main is installed alongside) and optionally sent to SparkHub. Gene execution results flow back to update the source Ember's credibility.
 
 ---
 

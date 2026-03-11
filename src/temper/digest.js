@@ -14,6 +14,8 @@ const { discoverAllContextDimensions } = require('./context-discovery');
 const { shouldProfile, generateProfile, generatePersonaText, readAllPreferenceMaps } = require('../core/preference-map');
 const { withFileLock } = require('../core/file-lock');
 const { runRetrospective } = require('../kindle/retrospective');
+const { runSparkMerge } = require('./spark-merger');
+const { findCrystallizableDomains } = require('../forge/skill-crystallizer');
 
 function buildSkippedDigestReport(opts, reason) {
   var o = opts || {};
@@ -36,6 +38,7 @@ function buildSkippedDigestReport(opts, reason) {
       practice_records: 0,
       practice_accepted: 0,
       practice_rejected: 0,
+      sparks_merged: 0,
       promoted_to_refined: 0,
       publish_ready: 0,
       rejected: 0,
@@ -45,12 +48,14 @@ function buildSkippedDigestReport(opts, reason) {
     },
     new_refined_sparks: [],
     publish_ready: [],
+    merge: { ok: true, merges: 0, merged_sparks: [] },
     retrospective: { ok: true, skipped: true, skip_reason: reason || 'locked', sessions_analyzed: 0, sparks_extracted: 0, sparks: [] },
     preference_profiles: [],
     review_cards: [],
     capability_changes: {},
     blind_spots: [],
     learning_suggestions: [],
+    crystallization_ready: [],
     created_at: new Date().toISOString(),
   };
 }
@@ -133,6 +138,22 @@ async function runDigestUnlocked(opts) {
     }
   }
   var clusterData = rebuildClusterCache(allActiveSparks.concat(refinedSparks), allRelations);
+
+  // Step 4.7: Spark Merge — synthesize clusters of related small sparks into comprehensive knowledge
+  var mergeResult = { ok: true, merges: 0, merged_sparks: [] };
+  var skipMerge = o.skipMerge || String(process.env.STP_SKIP_MERGE || '').toLowerCase() === 'true';
+  if (!skipMerge) {
+    try {
+      mergeResult = await runSparkMerge({
+        allRawSparks: allRawSparks,
+        clusterData: clusterData,
+        dryRun: o.dryRun,
+      });
+    } catch (e) {
+      mergeResult = { ok: false, error: e.message, merges: 0, merged_sparks: [] };
+    }
+  }
+
   for (var k = 0; k < refinedSparks.length; k++) {
     decayRefinedSpark(refinedSparks[k], now);
   }
@@ -214,6 +235,12 @@ async function runDigestUnlocked(opts) {
       });
   } catch (e) { /* review cards are best-effort */ }
 
+  // Step 9.5: Detect domains ready for skill crystallization
+  var crystallizationReady = [];
+  try {
+    crystallizationReady = findCrystallizableDomains(allRawSparks);
+  } catch (e) { /* best-effort */ }
+
   // Generate digest report
   var report = {
     type: 'DigestReport',
@@ -230,6 +257,7 @@ async function runDigestUnlocked(opts) {
       practice_rejected: recentPractice.filter(p => p.outcome === 'rejected').length,
       boundaries_discovered: boundaryDiscoveries.length,
       clusters_built: clusterData.clusters ? clusterData.clusters.length : 0,
+      sparks_merged: mergeResult.merges || 0,
       promoted_to_refined: promotionResult.promoted,
       publish_ready: publishReady.length,
       rejected: rejected.length,
@@ -250,6 +278,11 @@ async function runDigestUnlocked(opts) {
       summary: r.summary,
     })),
     preference_profiles: profileUpdates,
+    merge: {
+      ok: mergeResult.ok !== false,
+      merges: mergeResult.merges || 0,
+      merged_sparks: mergeResult.merged_sparks || [],
+    },
     retrospective: {
       ok: retroResult.ok,
       sessions_analyzed: retroResult.sessions_analyzed || 0,
@@ -270,6 +303,7 @@ async function runDigestUnlocked(opts) {
         'Explore web resources about ' + d,
       ],
     })),
+    crystallization_ready: crystallizationReady,
     created_at: new Date().toISOString(),
   };
 

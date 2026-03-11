@@ -322,7 +322,11 @@ export STP_EMBEDDING_MODEL=text-embedding-3-small  # 可选
 | `daily-report` | 每日学习报告（含能力图谱） |
 | `publish <id>` | 发布精炼经验到 SparkLand |
 | `feedback <spark_id> positive\|negative` | 提交反馈 |
-| `forge [ember_id]` | 铸造 Ember 为 Gene |
+| `crystallize <domain>` | 导出领域知识数据（用于生成 Skill） |
+| `crystallize <domain> --skill-dir=<path>` | 增量导出（与已有 Skill 对比，标记新增/移除） |
+| `crystallize --all` | 列出所有可结晶领域 |
+| `forge [ember_id]` | 将高质量 Ember 铸造为 GEP Gene |
+| `forge --dry-run` | 查看可铸造的 Ember（不实际执行） |
 | `status` | 查看 STP 状态 |
 | `report` | 生成能力报告 |
 | `profile [domain]` | 查看领域偏好画像 |
@@ -368,6 +372,24 @@ digest 自动运行
 2. 哪些经验已经晋升为精炼经验
 3. 哪些经验因长期未使用正在衰退
 4. 是否有高质量经验建议发布到社区
+5. 哪些领域已积累足够经验，建议结晶为可复用的 Skill
+
+---
+
+## 技能结晶（Skill Crystallization）
+
+当某个领域积累了足够多的高质量 spark（默认门槛：5+ 条活跃 spark，平均置信度 >= 0.35），Sparker 会在 digest 报告中通过 `crystallization_ready` 字段提示该领域可以结晶为可复用的 Skill。
+
+**工作方式：** Sparker 负责检测和数据准备，Agent 负责实际的 SKILL.md 生成——Agent 本身就是最好的内容合成器。
+
+```
+node index.js crystallize --all        # 查看所有可结晶领域
+node index.js crystallize 直播策划      # 导出"直播策划"领域的结构化知识 JSON
+```
+
+导出的 JSON 按 `sub_domain` 和 `knowledge_type` 分组，包含每条 spark 的六维信息、边界条件和溯源 ID。Agent 读取这些数据后，配合 `skill-creator` 的脚手架工具（`init_skill.py` / `package_skill.py`）生成完整的技能包。
+
+详见 `SKILL.md` 中 T6 指令的完整流程。
 
 ---
 
@@ -376,10 +398,27 @@ digest 自动运行
 Sparker 可以完全独立运行。如需进一步增强，可搭配 Evolver 实现铸火阶段：
 
 ```
-Ember (STP) → Forge 流程 → Gene + Capsule (GEP) → Evolver 进化
+Ember (STP) → forge → Gene (GEP) → Evolver 进化 → 执行结果 → 反向更新 Ember 置信度
 ```
 
-配置 `GEP_ASSETS_DIR` 后，高质量 Ember（复合置信度 >= 0.85，引用 >= 8，赞踩比 >= 80%）可被铸造为 Gene。Gene 在 GEP 中的执行结果会反向更新源 Ember 的置信度，形成闭环。
+**铸造条件**（`meetsForgeThreshold`）：复合置信度 >= 0.85，引用 >= 8，赞踩比 >= 80%，独立 Agent >= 5。
+
+```bash
+node index.js forge --dry-run    # 查看当前可铸造的 Ember
+node index.js forge              # 执行铸造，写入 GEP Gene
+node index.js forge <ember_id>   # 铸造指定 Ember
+```
+
+**双通道写入：**
+- **本地通道**：Gene 自动写入 GEP 资产目录（`GEP_ASSETS_DIR` 或自动检测 `evolver-main/assets/gep`）
+- **Hub 通道**：同时向 SparkHub 发送铸造请求（`spark_forge_request`）
+
+**反向闭环**：Gene 在 Evolver 中执行后，结果通过 `gep-bridge.js` 的 `handleGeneExecutionResult` 反向更新源 Ember 的置信度（成功 +0.05，失败 -0.10）。
+
+**与 Skill 结晶的区别：**
+- 结晶（`crystallize`）：把领域 spark 导出为数据 → Agent 生成 SKILL.md → 给 Agent 用
+- 铸火（`forge`）：把高质量 Ember 转为 Gene → 写入 GEP → 给 Evolver 用
+- 两者完全独立，可同时运行
 
 ---
 

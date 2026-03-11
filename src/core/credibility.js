@@ -8,6 +8,7 @@ const SOURCE_INITIAL_CONFIDENCE = {
   task_negotiation: 0.35,
   human_choice: 0.30,
   retrospective: 0.30,
+  synthesis: 0.45,
   agent_exchange: 0.25,
   casual_mining: 0.25,
   web_exploration: 0.20,

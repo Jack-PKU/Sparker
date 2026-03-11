@@ -3,7 +3,7 @@
 // Sparker CLI — STP knowledge extraction, refinement, search, and lifecycle.
 // Usage: node index.js <command> --file=<json_path> [options]
 //    or: echo '<json>' | node index.js <command> [options]
-// Commands: kindle, teach, digest, search, publish, forge, ingest, profile, review,
+// Commands: kindle, teach, digest, search, publish, forge, crystallize, ingest, profile, review,
 //           status, plan, post-task, report, strategy, login, register, bind, whoami, hub-url
 
 var fs = require('fs');
@@ -254,11 +254,33 @@ async function handleCategories() {
 }
 
 async function handleForge(args) {
-  var { forgeAll } = require('./src/forge/forge-engine');
+  var { forgeAll, forgeEmber } = require('./src/forge/forge-engine');
+  var emberId = args.positional[0] || args.flags.ember;
+  if (emberId) {
+    var opts = {};
+    if (args.flags['dry-run'] || args.flags.dryRun) opts.dryRun = true;
+    if (args.flags.force) opts.force = true;
+    var result = await forgeEmber(emberId, opts);
+    console.log(JSON.stringify(result));
+    return;
+  }
+  var allOpts = {};
+  if (args.flags['dry-run'] || args.flags.dryRun) allOpts.dryRun = true;
+  if (args.flags.force) allOpts.force = true;
+  if (args.flags.domain) allOpts.domain = args.flags.domain;
+  var result = await forgeAll(allOpts);
+  console.log(JSON.stringify(result));
+}
+
+async function handleCrystallize(args) {
+  var { runCrystallize } = require('./src/forge/skill-crystallizer');
   var opts = {};
-  if (args.flags.force) opts.force = true;
+  if (args.flags.all) opts.all = true;
+  if (args.flags.detail) opts.detail = true;
+  if (args.positional[0]) opts.domain = args.positional[0];
   if (args.flags.domain) opts.domain = args.flags.domain;
-  var result = await forgeAll(opts);
+  if (args.flags['skill-dir']) opts.skillDir = args.flags['skill-dir'];
+  var result = runCrystallize(opts);
   console.log(JSON.stringify(result));
 }
 
@@ -808,6 +830,9 @@ async function main() {
     case 'forge':
       await handleForge(args);
       break;
+    case 'crystallize':
+      await handleCrystallize(args);
+      break;
     case 'ingest':
       await handleIngest(args);
       break;
@@ -879,7 +904,8 @@ async function main() {
       process.stderr.write('  categories  Fetch category tree from SparkHub (for pre-classification)\n');
       process.stderr.write('  feedback    Send vote (positive/negative) to hub for used sparks\n');
       process.stderr.write('  digest      Run periodic review\n');
-      process.stderr.write('  forge       Crystallize Ember into Gene\n\n');
+      process.stderr.write('  forge       Forge eligible Embers into GEP Genes\n');
+      process.stderr.write('  crystallize Export domain knowledge for skill generation\n\n');
       process.stderr.write('Info:\n');
       process.stderr.write('  status        Show STP status and hub connection\n');
       process.stderr.write('  report        Generate capability report\n');

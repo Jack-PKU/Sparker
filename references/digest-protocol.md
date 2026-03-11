@@ -1,6 +1,6 @@
-# Digest + Review + Transmit Protocol
+# Digest + Retrospective + Review + Transmit Protocol
 
-The full digest cycle has 3 sequential steps.
+The full digest cycle has 4 sequential steps.
 
 ## Step 1: Run Digest
 
@@ -8,11 +8,41 @@ The full digest cycle has 3 sequential steps.
 exec: node SPARKER/index.js digest
 ```
 
-This runs the refinement pipeline: aggregate → group → synthesize RefinedSparks → decay → update capability map.
+This runs: retrospective analysis → refinement pipeline → decay → update capability map.
 
-## Step 2: Present Results to User
+## Step 2: Present Retrospective Discoveries (MANDATORY if any found)
 
-After digest completes, present a concise review report:
+**If `retrospective.sparks_extracted > 0`**, you MUST proactively present discoveries FIRST:
+
+```
+🔍 Retrospective Analysis
+
+I reviewed {sessions_analyzed} recent conversations and discovered {sparks_extracted} insights
+I missed during our chats:
+
+1. [{domain}] {summary}
+   Signal: {signal_type} | Confidence: {confidence}
+   Evidence: "{evidence snippet}"
+
+2. [{domain}] {summary}
+   Signal: {signal_type} | Confidence: {confidence}
+   Evidence: "{evidence snippet}"
+
+These are marked as pending verification. Please confirm, correct, or dismiss:
+→ [Confirm all] [Review each] [Dismiss all]
+```
+
+If user confirms a retrospective spark, kindle a reinforcement to upgrade it:
+```
+exec: echo '{"source":"human_feedback","domain":"<domain>","knowledge_type":"<type>","when":{"trigger":"<trigger>"},"why":"User confirmed retrospective discovery","how":{"summary":"<original>","detail":"Confirmed during digest review"},"result":{"expected_outcome":"Confidence upgraded from retrospective"}}' | node SPARKER/index.js kindle
+```
+
+If user corrects a retrospective spark, kindle the corrected version instead.
+If user dismisses, no action needed (spark stays at low confidence and will decay).
+
+## Step 3: Present Refinement Results
+
+After retrospective review, present the main digest report:
 
 ```
 📊 Learning Review
@@ -41,7 +71,7 @@ If user confirms at-risk sparks are still valid, kindle a reinforcement spark:
 exec: echo '{"source":"human_feedback","domain":"<domain>","knowledge_type":"<type>","when":{"trigger":"<original>"},"why":"User confirmed still valid during periodic review","how":{"summary":"<original>","detail":"User confirmed validity during review"},"result":{"expected_outcome":"Credibility restored"}}' | node SPARKER/index.js kindle
 ```
 
-## Step 3: Propose Transmit (Publish to SparkHub)
+## Step 4: Propose Transmit (Publish to SparkHub)
 
 If new RefinedSparks have credibility >= 0.50, ask the user:
 

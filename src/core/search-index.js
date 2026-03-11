@@ -4,7 +4,7 @@
 
 var fs = require('fs');
 var path = require('path');
-var { PATHS, readRawSparks, readRefinedSparks, readEmbers, readJson, ensureDir } = require('./storage');
+var { PATHS, readRawSparks, readRefinedSparks, readEmbers, readHubCacheAsList, readJson, ensureDir } = require('./storage');
 var { tokenize, buildTfVector, sparkToText } = require('./similarity');
 
 var SKILL_ROOT = path.resolve(__dirname, '..', '..');
@@ -19,6 +19,7 @@ function getSourceMtimes() {
     raw_sparks: PATHS.rawSparks(),
     embers: PATHS.embers(),
     refined_sparks: PATHS.refinedSparks(),
+    hub_cache: PATHS.hubCache(),
   };
   for (var key in files) {
     try {
@@ -42,8 +43,9 @@ function rebuildSearchIndex() {
   var refinedSparks = readRefinedSparks().filter(function (s) {
     return s.status === 'published' || s.status === 'active';
   });
+  var hubCached = readHubCacheAsList();
 
-  var allSparks = [].concat(rawSparks, embers, refinedSparks);
+  var allSparks = [].concat(rawSparks, embers, refinedSparks, hubCached);
 
   // Load old index to preserve existing embeddings
   var oldEmbeddings = {};
@@ -175,7 +177,8 @@ function loadSearchIndex() {
 
   if (stored.raw_sparks !== currentMtimes.raw_sparks ||
       stored.embers !== currentMtimes.embers ||
-      stored.refined_sparks !== currentMtimes.refined_sparks) {
+      stored.refined_sparks !== currentMtimes.refined_sparks ||
+      stored.hub_cache !== currentMtimes.hub_cache) {
     return null;
   }
 

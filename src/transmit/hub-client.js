@@ -112,6 +112,12 @@ function buildSyncMessage(opts) {
 
 // --- HTTP transport ---
 
+function getSparkerVersion() {
+  try {
+    return require('../../package.json').version;
+  } catch (e) { return 'unknown'; }
+}
+
 function buildHttpHeaders() {
   var headers = { 'Content-Type': 'application/json' };
   var bindingKey = getBindingKey();
@@ -122,6 +128,7 @@ function buildHttpHeaders() {
   if (nodeId) {
     headers['X-Node-Id'] = nodeId;
   }
+  headers['X-Sparker-Version'] = getSparkerVersion();
   return headers;
 }
 
@@ -136,6 +143,21 @@ var TYPE_TO_ENDPOINT = {
   spark_domain: '/spark/spark_domain',
 };
 
+var _updateWarningShown = false;
+
+function checkUpdateHeader(res) {
+  if (_updateWarningShown) return;
+  var updateAvailable = res.headers.get('x-sparker-update-available');
+  var latestVersion = res.headers.get('x-sparker-latest-version');
+  if (updateAvailable === 'true' && latestVersion) {
+    _updateWarningShown = true;
+    process.stderr.write(
+      '[Sparker] 新版本 v' + latestVersion + ' 可用（当前 v' + getSparkerVersion() + '）。' +
+      '更新方法：cd skills/sparker && git pull && npm install --omit=dev\n'
+    );
+  }
+}
+
 async function httpTransportSend(message) {
   var hubUrl = getHubUrl();
   if (!hubUrl) return { ok: false, error: 'STP_HUB_URL not set' };
@@ -149,8 +171,16 @@ async function httpTransportSend(message) {
       body: JSON.stringify(message),
       signal: AbortSignal.timeout(15000),
     });
+    checkUpdateHeader(res);
     var data = await res.json();
-    return { ok: res.ok, status: res.status, response: data };
+    var result = { ok: res.ok, status: res.status, response: data };
+    if (res.headers.get('x-sparker-update-available') === 'true') {
+      result.update_available = {
+        latest: res.headers.get('x-sparker-latest-version'),
+        current: getSparkerVersion(),
+      };
+    }
+    return result;
   } catch (err) {
     return { ok: false, error: err.message };
   }
@@ -193,7 +223,7 @@ async function hubSearch(query, opts) {
   var payload = result.response && result.response.payload ? result.response.payload : result.response;
   var sparks = payload.sparks || [];
 
-  return {
+  var searchResult = {
     ok: true,
     results: sparks.map(normalizeHubSpark),
     total: payload.total || sparks.length,
@@ -203,6 +233,8 @@ async function hubSearch(query, opts) {
     insufficient_at: payload.insufficient_at || null,
     balance: typeof payload.balance === 'number' ? payload.balance : null,
   };
+  if (result.update_available) searchResult.update_available = result.update_available;
+  return searchResult;
 }
 
 // Normalize a Hub spark into the same structure as local sparks (B2 fix)
@@ -302,6 +334,7 @@ async function hubGetCategoryTree() {
       headers: buildHttpHeaders(),
       signal: AbortSignal.timeout(10000),
     });
+    checkUpdateHeader(res);
     var data = await res.json();
     return { ok: res.ok, tree: data.tree || [], level_semantics: data.level_semantics || null };
   } catch (err) {

@@ -13,6 +13,7 @@ var VERIFICATION_RULES = {
   micro_probe: 'human_confirmed',
   human_choice: 'agent_confirmed',
   casual_mining: 'pending_verification',
+  retrospective: 'pending_verification',
   web_exploration: 'pending_verification',
   post_task: 'agent_confirmed',
   self_diagnosis: 'agent_confirmed',

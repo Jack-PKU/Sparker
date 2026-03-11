@@ -51,6 +51,7 @@ var PATHS = {
   rawSparksSnapshot: function () { return resolvePath('raw_sparks', 'raw_sparks_snapshot.json'); },
   refinedSparks: function () { return resolvePath('refined_sparks', 'refined_sparks.json'); },
   embers: function () { return resolvePath('embers', 'embers.json'); },
+  hubCache: function () { return resolvePath('hub_cache', 'hub_cache.json'); },
   practiceRecords: function () { return resolvePath('practice_records', 'practice_records.jsonl'); },
   extractionSessions: function () { return resolvePath('extraction_sessions', 'sessions.jsonl'); },
   digestReports: function () { return resolvePath('digest_reports', 'digest_reports.jsonl'); },
@@ -201,6 +202,40 @@ function updateEmber(id, updates) {
   return null;
 }
 
+// --- Hub Cache (purchased sparks from SparkLand) ---
+
+function readHubCache() {
+  var data = readJson(PATHS.hubCache(), { version: 1, sparks: {} });
+  return (data && typeof data.sparks === 'object') ? data.sparks : {};
+}
+
+function readHubCacheAsList() {
+  var map = readHubCache();
+  var list = [];
+  for (var id in map) list.push(map[id]);
+  return list;
+}
+
+function appendHubCache(sparks) {
+  if (!sparks || sparks.length === 0) return 0;
+  var data = readJson(PATHS.hubCache(), { version: 1, sparks: {} });
+  if (!data.sparks || typeof data.sparks !== 'object') data.sparks = {};
+  var added = 0;
+  for (var i = 0; i < sparks.length; i++) {
+    var s = sparks[i];
+    if (s.id && !data.sparks[s.id]) {
+      data.sparks[s.id] = s;
+      data.sparks[s.id]._cached_at = new Date().toISOString();
+      added++;
+    }
+  }
+  if (added > 0) {
+    data.updated_at = new Date().toISOString();
+    writeJson(PATHS.hubCache(), data);
+  }
+  return added;
+}
+
 // --- Practice Records ---
 
 function readPracticeRecords() {
@@ -249,6 +284,9 @@ module.exports = {
   readEmbers: readEmbers,
   appendEmber: appendEmber,
   updateEmber: updateEmber,
+  readHubCache: readHubCache,
+  readHubCacheAsList: readHubCacheAsList,
+  appendHubCache: appendHubCache,
   readPracticeRecords: readPracticeRecords,
   appendPracticeRecord: appendPracticeRecord,
   readExtractionSessions: readExtractionSessions,

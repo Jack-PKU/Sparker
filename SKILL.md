@@ -109,6 +109,7 @@ Load `references/distillation-examples.md` for good/bad examples across domains.
 | Multi-round refinement final | `iterative_refinement` | 0.35+n×0.05 |
 | User picks A or B | `human_choice` | 0.30 |
 | Agent probes, user answers | `micro_probe` | 0.40 |
+| Retrospective analysis (digest auto-discovery) | `retrospective` | 0.30 |
 | Web search result | `web_exploration` | 0.20 |
 | Post-task observation | `post_task` | 0.15 |
 
@@ -139,7 +140,7 @@ exec: node SPARKER/index.js teach <domain>
 
 Then follow the 6-step extraction flow in `references/capture-techniques.md`.
 
-### T5: Digest + Review + Transmit
+### T5: Digest + Retrospective + Review + Transmit
 
 **When (any):** User says "digest" / "summarize" / "review", OR 10+ raw sparks accumulated, OR lifecycle daemon triggers.
 **Do:** Run the full digest-review-transmit cycle.
@@ -148,9 +149,25 @@ Then follow the 6-step extraction flow in `references/capture-techniques.md`.
 exec: node SPARKER/index.js digest
 ```
 
-Then present results and optionally propose publishing to SparkHub.
+**Retrospective Analysis (automatic):** Digest now includes a retrospective step that reads recent OpenClaw conversation logs (`~/.openclaw/agents/<name>/sessions/*.jsonl`) and uses LLM to extract knowledge signals missed during real-time conversation — implicit preferences, casual expertise, correction patterns, and unstated standards. These are added as `source: retrospective` sparks with `pending_verification` status.
 
-Load `references/digest-protocol.md` for the complete 3-step workflow.
+**MANDATORY: Present retrospective results to user.** After digest completes, if `retrospective.sparks_extracted > 0`, you MUST proactively inform the user:
+
+> "In my review of our recent conversations, I discovered {N} insights I missed in real-time:
+>
+> 1. [{domain}] {summary} — {signal_type}
+> 2. [{domain}] {summary} — {signal_type}
+>
+> These are marked as pending verification. Would you like to confirm, correct, or dismiss any of them?"
+
+If user confirms a retrospective spark, kindle a reinforcement to upgrade it:
+```
+exec: echo '{"source":"human_feedback","domain":"<domain>","knowledge_type":"<type>","when":{"trigger":"<trigger>"},"why":"User confirmed retrospective discovery","how":{"summary":"<original>","detail":"Confirmed during digest review"},"result":{"expected_outcome":"Confidence upgraded from retrospective"}}' | node SPARKER/index.js kindle
+```
+
+Then present refinement results and optionally propose publishing to SparkHub.
+
+Load `references/digest-protocol.md` for the complete workflow.
 
 ### T6: Skill Crystallization
 
@@ -183,6 +200,23 @@ exec: node SPARKER/index.js retry
 ```
 
 Publish states: `candidate` → `pending_remote` → `synced` (or `sync_failed`).
+
+---
+
+## Version Update
+
+When interacting with SparkLand, Sparker sends its version via the `X-Sparker-Version` header.
+If the server detects your version is outdated, command output will include an update notice.
+
+**When you see an update notice:**
+1. Inform the user that a new version is available.
+2. Suggest running the update command:
+
+```bash
+cd SPARKER && git pull && npm install --omit=dev
+```
+
+3. After the user confirms, execute the update and verify with `node index.js status`.
 
 ---
 

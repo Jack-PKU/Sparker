@@ -2,7 +2,7 @@
 // When embedding is configured and vectors are in the index, uses hybrid scoring
 // (vector * 0.6 + TF-IDF * 0.4). Falls back to pure TF-IDF when no embeddings.
 
-var { readRawSparks, readRefinedSparks, readEmbers } = require('../core/storage');
+var { readRawSparks, readRefinedSparks, readEmbers, readHubCacheAsList, appendHubCache } = require('../core/storage');
 var { computeSimilarities, sparkToText, tokenize, buildTfVector } = require('../core/similarity');
 var { loadSearchIndex, rebuildSearchIndex } = require('../core/search-index');
 var { hubSearch, getHubUrl } = require('./hub-client');
@@ -154,7 +154,8 @@ function searchLocalFull(query, opts) {
   var rawSparks = readRawSparks().filter(function (s) { return s.status !== 'rejected'; });
   var embers = readEmbers();
   var refinedSparks = readRefinedSparks().filter(function (s) { return s.status === 'published' || s.status === 'active'; });
-  var candidates = [].concat(rawSparks, embers, refinedSparks);
+  var hubCached = readHubCacheAsList();
+  var candidates = [].concat(rawSparks, embers, refinedSparks, hubCached);
 
   if (domain) {
     candidates = candidates.filter(function (c) {
@@ -226,8 +227,22 @@ async function searchRemote(query, opts) {
       process.stderr.write('[sparker] Hub search failed: ' + (result.error || 'unknown') + '\n');
       return { results: [], error: result.error || 'hub_error' };
     }
+    var results = result.results || [];
+
+    var ownedIds = {};
+    if (result.purchased_spark_ids) {
+      for (var pi = 0; pi < result.purchased_spark_ids.length; pi++) ownedIds[result.purchased_spark_ids[pi]] = true;
+    }
+    if (result.already_owned_ids) {
+      for (var ai = 0; ai < result.already_owned_ids.length; ai++) ownedIds[result.already_owned_ids[ai]] = true;
+    }
+    var toCache = results.filter(function (r) { return ownedIds[r.id]; });
+    if (toCache.length > 0) {
+      try { appendHubCache(toCache); } catch (e) { /* best-effort */ }
+    }
+
     return {
-      results: result.results || [],
+      results: results,
       error: null,
       balance: result.balance,
       purchased_spark_ids: result.purchased_spark_ids,

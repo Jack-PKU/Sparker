@@ -13,6 +13,7 @@ const { discoverAllBoundaries } = require('./boundary-discovery');
 const { discoverAllContextDimensions } = require('./context-discovery');
 const { shouldProfile, generateProfile, generatePersonaText, readAllPreferenceMaps } = require('../core/preference-map');
 const { withFileLock } = require('../core/file-lock');
+const { runRetrospective } = require('../kindle/retrospective');
 
 function buildSkippedDigestReport(opts, reason) {
   var o = opts || {};
@@ -28,6 +29,8 @@ function buildSkippedDigestReport(opts, reason) {
     period_end: new Date(now).toISOString(),
     digest_hours: hours,
     summary: {
+      retrospective_sessions_analyzed: 0,
+      retrospective_sparks_extracted: 0,
       new_raw_sparks: 0,
       domains_active: 0,
       practice_records: 0,
@@ -42,6 +45,7 @@ function buildSkippedDigestReport(opts, reason) {
     },
     new_refined_sparks: [],
     publish_ready: [],
+    retrospective: { ok: true, skipped: true, skip_reason: reason || 'locked', sessions_analyzed: 0, sparks_extracted: 0, sparks: [] },
     preference_profiles: [],
     review_cards: [],
     capability_changes: {},
@@ -57,6 +61,17 @@ async function runDigestUnlocked(opts) {
   if (o.days) hours = o.days * 24;
   var now = Date.now();
   var cutoff = now - hours * 60 * 60 * 1000;
+
+  // Step 0: Retrospective Analysis — scan conversation logs for missed knowledge
+  var retroResult = { ok: true, skipped: true, reason: 'disabled', sparks_extracted: 0, sparks: [] };
+  var skipRetro = o.skipRetrospective || String(process.env.STP_SKIP_RETROSPECTIVE || '').toLowerCase() === 'true';
+  if (!skipRetro) {
+    try {
+      retroResult = await runRetrospective({ hours: hours, dryRun: o.dryRun });
+    } catch (e) {
+      retroResult = { ok: false, error: e.message, sparks_extracted: 0, sparks: [] };
+    }
+  }
 
   // Step 1: Gather recent raw sparks (with snapshot overlay for practice stats)
   var allRawSparks = readRawSparksWithSnapshot();
@@ -206,6 +221,8 @@ async function runDigestUnlocked(opts) {
     period_end: new Date(now).toISOString(),
     digest_hours: hours,
     summary: {
+      retrospective_sessions_analyzed: retroResult.sessions_analyzed || 0,
+      retrospective_sparks_extracted: retroResult.sparks_extracted || 0,
       new_raw_sparks: recentRaw.length,
       domains_active: Object.keys(byDomain).length,
       practice_records: recentPractice.length,
@@ -233,6 +250,15 @@ async function runDigestUnlocked(opts) {
       summary: r.summary,
     })),
     preference_profiles: profileUpdates,
+    retrospective: {
+      ok: retroResult.ok,
+      sessions_analyzed: retroResult.sessions_analyzed || 0,
+      sparks_extracted: retroResult.sparks_extracted || 0,
+      duplicates_skipped: retroResult.duplicates_skipped || 0,
+      sparks: retroResult.sparks || [],
+      skipped: retroResult.skipped || false,
+      skip_reason: retroResult.reason || null,
+    },
     review_cards: reviewCandidates,
     capability_changes: capabilityMap.domains,
     blind_spots: blindSpots,

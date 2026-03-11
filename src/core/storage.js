@@ -8,7 +8,12 @@ var path = require('path');
 var SKILL_ROOT = path.resolve(__dirname, '..', '..');
 
 function getStpAssetsDir() {
-  return path.join(SKILL_ROOT, 'assets', 'stp');
+  if (process.env.SPARK_ASSETS_DIR) return path.resolve(process.env.SPARK_ASSETS_DIR);
+  if (process.env.STP_ASSETS_DIR) return path.resolve(process.env.STP_ASSETS_DIR);
+  var sparkDir = path.join(SKILL_ROOT, 'assets', 'spark');
+  var stpDir = path.join(SKILL_ROOT, 'assets', 'stp');
+  if (fs.existsSync(stpDir) && !fs.existsSync(sparkDir)) return stpDir;
+  return sparkDir;
 }
 
 function ensureDir(dir) {

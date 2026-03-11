@@ -1,53 +1,53 @@
-# 微追问模板库
+# Micro-Probe Templates
 
-Agent 在回复的**末尾**顺带加一句微追问，而不是单独发消息追问。
-语气要像朋友间随口一问，不要像调查问卷。带上合理的理由（"下次好直接安排"）。
+Embed ONE micro-probe at the **end** of your normal reply — never as a standalone message.
+Tone should be casual, like a friend asking offhand. Include a brief reason ("so I can get it right next time").
 
-## 场景 1: 用户从多选项中选了一个
+## Scenario 1: User picked from multiple options
 
-**模板 A — 维度确认**
+**Template A — Dimension confirmation:**
 ```
-好的用{选项}来做。话说你主要是觉得{维度X}更对，还是{维度Y}更顺？下次类似的我好直接给你安排上。
-```
-
-**模板 B — 通用性确认**
-```
-收到，按{选项}来。这个偏好是你这类项目通用的，还是这次比较特殊？
+Got it, going with {option}. Was it more about {dimension X} or {dimension Y}? Just so I nail it next time.
 ```
 
-**模板 C — 反向探测**
+**Template B — Generality check:**
 ```
-明白。如果{另一选项}的{某方面}调整一下，你会不会考虑？只是想确认一下关键在哪。
-```
-
-## 场景 2: 用户纠正了 Agent 的输出
-
-**模板 D — 边界探测**
-```
-学到了！这个「{纠正要点}」是这类{情境}都这样，还是有例外？
+Noted, using {option}. Is this your general preference for this kind of project, or specific to this one?
 ```
 
-**模板 E — 原因探测**
+**Template C — Reverse probe:**
 ```
-记住了。主要是因为{推测原因A}，还是{推测原因B}？
-```
-
-## 场景 3: 用户随口提到了一个经验判断
-
-**模板 F — 范围确认**
-```
-你说「{经验判断}」——这个在{更大范围}也成立吗？
+Makes sense. If {other option}'s {aspect} were tweaked, would you consider it? Just trying to pin down the key factor.
 ```
 
-**模板 G — 条件确认**
+## Scenario 2: User corrected your output
+
+**Template D — Boundary probe:**
 ```
-有意思。有没有什么情况下这个「{判断}」反而不成立？
+Learned! Does "{correction}" apply to all {context}, or are there exceptions?
 ```
 
-## 使用规则
+**Template E — Cause probe:**
+```
+Got it. Mainly because of {hypothesis A}, or {hypothesis B}?
+```
 
-1. 每次交互**最多**追问 1 次（受打扰预算控制）
-2. 追问必须嵌入正常回复末尾，不单独发消息
-3. 二选一 / 确认式问题优先（用户 2 秒就能回答）
-4. 如果用户上一轮忽略了追问或表示不想回答，本次**不追问**
-5. 追问产出的 Spark 标记为 `human_confirmed`，confidence 直接 0.40
+## Scenario 3: User casually shared an insight
+
+**Template F — Scope check:**
+```
+You mentioned "{insight}" — does that hold true for {broader scope} too?
+```
+
+**Template G — Exception check:**
+```
+Interesting. Any situation where "{insight}" wouldn't apply?
+```
+
+## Rules
+
+1. **Max 1 probe** per interaction (controlled by budget)
+2. Must be embedded at the end of a normal reply, not standalone
+3. Prefer binary / confirmation questions (answerable in 2 seconds)
+4. If user ignored or declined the previous probe, **skip this time**
+5. Sparks from probe answers: `source: "micro_probe"`, confidence 0.40, `confirmation_status: "human_confirmed"`

@@ -18,15 +18,19 @@ var INGEST_PROMPT_TEMPLATE = [
   'You are an expert knowledge extractor. From the document below, extract',
   'reusable professional insights that an AI assistant could apply to future tasks.',
   '',
-  'For EACH insight, output a JSON object:',
-  '  heuristic        — one actionable sentence (the rule, tip, or pattern)',
-  '  heuristic_type   — "rule" | "preference" | "pattern" | "boundary"',
-  '  domain           — which professional domain this belongs to',
-  '  sub_domain       — more specific area within the domain',
-  '  applicable_when  — array of conditions when this applies',
-  '  not_applicable_when — array of conditions when this does NOT apply',
-  '  evidence         — brief quote or reference from the document supporting this',
-  '  confidence_note  — how certain you are about this extraction',
+  'For EACH insight, output a JSON object with the **six-dimension structure**:',
+  '',
+  '  knowledge_type  — "rule" | "preference" | "pattern" | "boundary" | "lesson" | "data_point"',
+  '  when            — { trigger: string (what triggers this knowledge),',
+  '                      conditions: string[] (preconditions for applicability) }',
+  '  where           — { domain: string, sub_domain: string, scenario: string, audience: string }',
+  '  why             — string (why this knowledge matters or works)',
+  '  how             — { summary: string (one-sentence action), detail: string (step-by-step if applicable) }',
+  '  result          — { expected_outcome: string }',
+  '  not             — array of { condition: string, effect: string, reason: string }',
+  '                    (when this does NOT apply)',
+  '  evidence        — brief quote or reference from the document supporting this',
+  '  confidence_note — how certain you are about this extraction',
   '',
   'Extract these knowledge types:',
   '  - Heuristic rules ("When X, do Y")',
@@ -152,15 +156,59 @@ function parseIngestResponse(text) {
   if (cleaned.startsWith('```')) {
     cleaned = cleaned.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
   }
-  try {
-    var arr = JSON.parse(cleaned);
-    if (!Array.isArray(arr)) return [];
-    return arr.filter(function (item) {
-      return item && item.heuristic;
-    });
-  } catch (e) {
-    return [];
+
+  function tryParseArr(s) {
+    try {
+      var arr = JSON.parse(s);
+      if (Array.isArray(arr)) return arr;
+      return null;
+    } catch (e) { return null; }
   }
+
+  function tryParseObj(s) {
+    try {
+      var o = JSON.parse(s);
+      if (o && typeof o === 'object' && !Array.isArray(o)) return o;
+      return null;
+    } catch (e) { return null; }
+  }
+
+  var arr = tryParseArr(cleaned);
+
+  if (!arr) {
+    // LLM sometimes emits unescaped quotes inside string values.
+    // Extract individual top-level objects from the array using brace depth tracking,
+    // skipping over string contents to avoid false matches.
+    arr = [];
+    var inString = false, escaped = false, braceDepth = 0, objStart = -1;
+    for (var i = 0; i < cleaned.length; i++) {
+      var ch = cleaned[i];
+      if (escaped) { escaped = false; continue; }
+      if (ch === '\\' && inString) { escaped = true; continue; }
+      if (ch === '"') { inString = !inString; continue; }
+      if (inString) continue;
+
+      if (ch === '{') {
+        braceDepth++;
+        if (braceDepth === 1) objStart = i;
+      } else if (ch === '}') {
+        braceDepth--;
+        if (braceDepth === 0 && objStart >= 0) {
+          var chunk = cleaned.slice(objStart, i + 1);
+          var obj = tryParseObj(chunk);
+          if (obj) {
+            arr.push(obj);
+          }
+          objStart = -1;
+        }
+      }
+    }
+    if (arr.length === 0) return [];
+  }
+
+  return arr.filter(function (item) {
+    return item && (item.heuristic || (item.how && item.how.summary) || item.knowledge_type);
+  });
 }
 
 async function ingestFile(filePath, opts) {
@@ -178,26 +226,48 @@ async function ingestFile(filePath, opts) {
   var candidates = [];
   for (var i = 0; i < insights.length; i++) {
     var ins = insights[i];
+    // V2: extract six-dimension fields from LLM response
+    var insWhen = ins.when || {};
+    var insWhere = ins.where || {};
+    var insHow = ins.how || {};
+    var insNot = ins.not || [];
+    var insDomain = insWhere.domain || ins.domain || o.domain || 'general';
+    var insSubDomain = insWhere.sub_domain || ins.sub_domain || null;
+    var heuristic = (insHow.summary || ins.heuristic || '');
+    // Backward-compat: map not_applicable_when to not[] if LLM uses old format
+    if (insNot.length === 0 && Array.isArray(ins.not_applicable_when)) {
+      insNot = ins.not_applicable_when.map(function (c) {
+        return { condition: c, effect: 'not_applicable', reason: '' };
+      });
+    }
+
     var spark = createRawSpark({
       source: 'human_teaching',
       trigger: 'document_ingestion: ' + path.basename(filePath),
-      content: ins.heuristic,
-      domain: ins.domain || o.domain || 'general',
+      content: heuristic,
+      domain: insDomain,
       extraction_method: 'document_ingestion',
       confirmation_status: o.auto_confirm ? 'human_confirmed' : 'unconfirmed',
       confidence: o.auto_confirm ? 0.45 : 0.20,
-      tags: [ins.heuristic_type || 'rule', ins.sub_domain].filter(Boolean),
+      tags: [ins.knowledge_type || ins.heuristic_type || 'rule', insSubDomain].filter(Boolean),
+      when: { trigger: insWhen.trigger || heuristic, conditions: insWhen.conditions || ins.applicable_when || [] },
+      where: { domain: insDomain, sub_domain: insSubDomain, scenario: insWhere.scenario || '', audience: insWhere.audience || '' },
+      why: ins.why || '',
+      how: { summary: heuristic, detail: insHow.detail || '' },
+      result: { expected_outcome: (ins.result && ins.result.expected_outcome) || '' },
+      not: insNot,
+      knowledge_type: ins.knowledge_type || ins.heuristic_type || 'rule',
       card: {
-        heuristic: ins.heuristic,
-        heuristic_type: ins.heuristic_type || 'rule',
+        heuristic: heuristic,
+        heuristic_type: ins.knowledge_type || ins.heuristic_type || 'rule',
         context_envelope: {
-          domain: ins.domain || o.domain || 'general',
-          sub_domain: ins.sub_domain || null,
+          domain: insDomain,
+          sub_domain: insSubDomain,
         },
-        boundary_conditions: (ins.not_applicable_when || []).map(function (c) {
-          return { condition: c, effect: 'not_applicable', reason: '' };
+        boundary_conditions: insNot.map(function (n) {
+          return { condition: n.condition || '', effect: n.effect || 'not_applicable', reason: n.reason || '' };
         }),
-        applicable_when: ins.applicable_when || [],
+        applicable_when: insWhen.conditions || ins.applicable_when || [],
         evidence: ins.evidence ? { source_document: path.basename(filePath), quote: ins.evidence } : null,
       },
     });

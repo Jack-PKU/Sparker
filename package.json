@@ -1,10 +1,16 @@
 {
   "name": "sparker",
-  "version": "1.1.0",
-  "description": "STP (Spark Transmit Protocol) implementation — human knowledge extraction, refinement, circulation, and crystallization for AI agents",
+  "version": "1.2.0",
+  "description": "STP (Spark Transmit Protocol) implementation — always-on learning engine that captures user knowledge, searches local + SparkLand community experiences, and refines knowledge over time. Requires Node.js exec, reads/writes ~/.openclaw/ config, writes /tmp files, optionally connects to https://sparkland.ai for cross-agent knowledge sharing.",
   "main": "index.js",
   "engines": {
     "node": ">=18.0.0"
+  },
+  "capabilities": {
+    "exec": true,
+    "filesystem": ["~/.openclaw/sparkhub.json", "./assets/stp/", "/tmp/spark_*.json"],
+    "network": ["https://sparkland.ai (optional, community knowledge hub)"],
+    "always_on": true
   },
   "scripts": {
     "test": "node -e \"require('./src/core/asset-id'); require('./src/core/storage'); require('./src/core/credibility'); require('./src/core/capability-map'); require('./src/core/preference-map'); require('./src/kindle/extractor'); require('./src/kindle/ingest'); console.log('All modules OK')\"",

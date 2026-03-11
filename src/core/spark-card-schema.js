@@ -180,9 +180,155 @@ function detectDominantType(cards) {
   return best;
 }
 
+// Merge six-dimension fields from multiple sparks.
+// Used by promoter to aggregate RawSparks into a RefinedSpark.
+function mergeSixDimensions(sparks) {
+  var allTriggers = [];
+  var allConditions = {};
+  var bestTriggerSpark = null;
+  var bestTriggerConf = -1;
+  var allWhys = [];
+  var allSummaries = [];
+  var allDetails = [];
+  var allOutcomes = [];
+  var allFeedback = [];
+  var allNots = [];
+  var notSet = {};
+  var whereDomain = '';
+  var whereSubDomain = '';
+  var whereScenarios = [];
+  var whereAudiences = [];
+  var knowledgeTypeCounts = {};
+
+  for (var i = 0; i < sparks.length; i++) {
+    var s = sparks[i];
+
+    // WHEN: collect triggers, pick highest-confidence one
+    if (s.when && s.when.trigger) {
+      allTriggers.push(s.when.trigger);
+      var conf = s.confidence || 0;
+      if (conf > bestTriggerConf) {
+        bestTriggerConf = conf;
+        bestTriggerSpark = s;
+      }
+      if (Array.isArray(s.when.conditions)) {
+        for (var ci = 0; ci < s.when.conditions.length; ci++) {
+          allConditions[s.when.conditions[ci]] = true;
+        }
+      }
+    }
+
+    // WHERE: collect, pick most frequent domain
+    if (s.where) {
+      if (s.where.domain) whereDomain = whereDomain || s.where.domain;
+      if (s.where.sub_domain) whereSubDomain = whereSubDomain || s.where.sub_domain;
+      if (s.where.scenario) whereScenarios.push(s.where.scenario);
+      if (s.where.audience) whereAudiences.push(s.where.audience);
+    }
+
+    // WHY: collect all
+    if (s.why) allWhys.push(s.why);
+
+    // HOW: collect summaries and details
+    if (s.how) {
+      if (s.how.summary) allSummaries.push(s.how.summary);
+      if (s.how.detail) allDetails.push(s.how.detail);
+    }
+
+    // RESULT: collect outcomes and feedback
+    if (s.result) {
+      if (s.result.expected_outcome) allOutcomes.push(s.result.expected_outcome);
+      if (Array.isArray(s.result.feedback_log)) {
+        allFeedback = allFeedback.concat(s.result.feedback_log);
+      }
+    }
+
+    // NOT: union with dedup
+    if (Array.isArray(s.not)) {
+      for (var ni = 0; ni < s.not.length; ni++) {
+        var nKey = (s.not[ni].condition || '').toLowerCase().trim();
+        if (nKey && !notSet[nKey]) {
+          notSet[nKey] = true;
+          allNots.push(s.not[ni]);
+        }
+      }
+    }
+
+    // knowledge_type: majority vote
+    var kt = s.knowledge_type || 'rule';
+    knowledgeTypeCounts[kt] = (knowledgeTypeCounts[kt] || 0) + 1;
+  }
+
+  // Pick dominant knowledge_type
+  var bestKt = 'rule';
+  var bestKtCount = 0;
+  for (var ktk in knowledgeTypeCounts) {
+    if (knowledgeTypeCounts[ktk] > bestKtCount) {
+      bestKt = ktk;
+      bestKtCount = knowledgeTypeCounts[ktk];
+    }
+  }
+
+  // Pick best trigger
+  var mergedTrigger = bestTriggerSpark ? bestTriggerSpark.when.trigger : (allTriggers[0] || '');
+
+  // Pick best summary (from highest-confidence spark)
+  var mergedSummary = bestTriggerSpark && bestTriggerSpark.how ? bestTriggerSpark.how.summary : (allSummaries[0] || '');
+
+  // Merge details: concatenate unique ones
+  var detailSet = {};
+  var mergedDetails = [];
+  for (var di = 0; di < allDetails.length; di++) {
+    var dKey = allDetails[di].trim().slice(0, 50);
+    if (!detailSet[dKey]) {
+      detailSet[dKey] = true;
+      mergedDetails.push(allDetails[di]);
+    }
+  }
+
+  // Dedup scenarios and audiences
+  var scenarioSet = {};
+  var uniqueScenarios = whereScenarios.filter(function(s) {
+    if (!s || scenarioSet[s]) return false;
+    scenarioSet[s] = true;
+    return true;
+  });
+  var audienceSet = {};
+  var uniqueAudiences = whereAudiences.filter(function(a) {
+    if (!a || audienceSet[a]) return false;
+    audienceSet[a] = true;
+    return true;
+  });
+
+  return {
+    knowledge_type: bestKt,
+    when: {
+      trigger: mergedTrigger,
+      conditions: Object.keys(allConditions),
+    },
+    where: {
+      domain: whereDomain,
+      sub_domain: whereSubDomain,
+      scenario: uniqueScenarios.join('；'),
+      audience: uniqueAudiences.join('、'),
+    },
+    why: allWhys.join('\n\n'),
+    how: {
+      summary: mergedSummary,
+      detail: mergedDetails.join('\n\n'),
+    },
+    result: {
+      expected_outcome: allOutcomes.join('；'),
+      feedback_log: allFeedback,
+    },
+    not: allNots,
+  };
+}
+
 module.exports = {
   createSparkCard,
   mergeCards,
+  mergeSixDimensions,
   normalizeBoundary,
   intersectEnvelopes,
 };

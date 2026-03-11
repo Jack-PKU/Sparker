@@ -135,14 +135,62 @@ async function registerOnHub(email, password, inviteCode) {
 
 function getIdentity() {
   var bk = getBindingKey();
+  var cfg = readConfig();
   return {
     node_id: getNodeId(),
     agent_name: getAgentName(),
     binding_key_preview: bk ? '***' + bk.slice(-8) : null,
     hub_url: getHubUrl(),
     bound: !!bk,
+    bound_at: cfg.bound_at || null,
+    binding_status: cfg.binding_status || (bk ? 'active' : 'none'),
     config_path: CONFIG_PATH,
   };
+}
+
+// Validate binding key against hub — checks if the key is still valid
+async function validateBindingKey() {
+  var hubUrl = getHubUrl();
+  var bk = getBindingKey();
+  if (!hubUrl || !bk) return { ok: false, error: 'not_configured' };
+
+  try {
+    var res = await fetch(hubUrl.replace(/\/+$/, '') + '/health', {
+      method: 'GET',
+      headers: { 'X-Sparkland-Binding-Key': bk },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (res.ok) {
+      return { ok: true, reachable: true };
+    }
+    if (res.status === 401 || res.status === 403) {
+      var cfg = readConfig();
+      cfg.binding_status = 'invalid';
+      cfg.binding_checked_at = new Date().toISOString();
+      writeConfig(cfg);
+      return { ok: false, error: 'binding_key_invalid', status: res.status };
+    }
+    return { ok: true, reachable: true };
+  } catch (err) {
+    return { ok: false, error: 'network_error', message: err.message };
+  }
+}
+
+// Handle consume rejection from hub (5 agent limit reached)
+function handleConsumeRejection(responseData) {
+  if (responseData && (responseData.consume_rejected || responseData.error === 'max_agents_reached')) {
+    var cfg = readConfig();
+    cfg.binding_status = 'consume_rejected';
+    cfg.consume_rejected_at = new Date().toISOString();
+    cfg.consume_rejection_reason = responseData.error || 'max_agents_reached';
+    writeConfig(cfg);
+    return {
+      rejected: true,
+      reason: responseData.error || 'max_agents_reached',
+      message: '该用户已绑定 5 个 Agent，达到上限。请在 SparkHub 管理已绑定的 Agent 后重试。',
+    };
+  }
+  return { rejected: false };
 }
 
 module.exports = {
@@ -155,6 +203,8 @@ module.exports = {
   loginToHub,
   registerOnHub,
   getIdentity,
+  validateBindingKey,
+  handleConsumeRejection,
   readConfig,
   writeConfig,
   CONFIG_PATH,

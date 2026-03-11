@@ -78,14 +78,56 @@ function sanitizeForPublishing(refinedSpark) {
     clean.not_applicable_when = clean.not_applicable_when.map(sanitizeText);
   }
 
-  // Sanitize contributor chain — keep type and role, redact specific IDs
+  // Sanitize contributor chain — keep type, role, and focus; redact specific IDs
   if (Array.isArray(clean.contributor_chain)) {
     for (var i = 0; i < clean.contributor_chain.length; i++) {
       var c = clean.contributor_chain[i];
       if (c.type === 'human') {
         c.id = 'contributor_' + (i + 1);
       }
+      if (Array.isArray(c.focus)) {
+        c.focus = c.focus.map(sanitizeText);
+      }
     }
+  }
+
+  // Sanitize six-dimension fields
+  if (clean.when) {
+    clean.when.trigger = sanitizeText(clean.when.trigger);
+    if (Array.isArray(clean.when.conditions)) {
+      clean.when.conditions = clean.when.conditions.map(sanitizeText);
+    }
+  }
+  if (clean.where) {
+    clean.where.scenario = sanitizeText(clean.where.scenario);
+    clean.where.audience = sanitizeText(clean.where.audience);
+  }
+  if (clean.why) {
+    clean.why = sanitizeText(clean.why);
+  }
+  if (clean.how) {
+    clean.how.summary = sanitizeText(clean.how.summary);
+    clean.how.detail = sanitizeText(clean.how.detail);
+  }
+  if (clean.result) {
+    clean.result.expected_outcome = sanitizeText(clean.result.expected_outcome);
+    if (Array.isArray(clean.result.feedback_log)) {
+      clean.result.feedback_log = clean.result.feedback_log.map(function(entry) {
+        var cleaned = Object.assign({}, entry);
+        if (cleaned.text) cleaned.text = sanitizeText(cleaned.text);
+        delete cleaned.session_id;
+        return cleaned;
+      });
+    }
+  }
+  if (Array.isArray(clean.not)) {
+    clean.not = clean.not.map(function(n) {
+      return {
+        condition: sanitizeText(n.condition),
+        effect: n.effect,
+        reason: sanitizeText(n.reason),
+      };
+    });
   }
 
   // Remove private context fields
@@ -94,7 +136,6 @@ function sanitizeForPublishing(refinedSpark) {
   delete clean.related_session;
 
   // Strip PII from card.context_envelope — keep professional context
-  // (role, industry, experience_level are anonymous professional attributes, not PII)
   if (clean.card && clean.card.context_envelope) {
     delete clean.card.context_envelope.contributor_name;
     delete clean.card.context_envelope.contributor_company;

@@ -92,8 +92,26 @@ function cosineSimilarity(vecA, vecB) {
 
 function sparkToText(spark) {
   var parts = [];
-  if (spark.domain) parts.push(spark.domain);
-  if (spark.content) parts.push(spark.content);
+
+  // V2 six-dimension fields (preferred)
+  if (spark.when && spark.when.trigger) parts.push(spark.when.trigger);
+  if (spark.where) {
+    if (spark.where.domain) parts.push(spark.where.domain);
+    if (spark.where.sub_domain) parts.push(spark.where.sub_domain);
+    if (spark.where.scenario) parts.push(spark.where.scenario);
+    if (spark.where.audience) parts.push(spark.where.audience);
+  }
+  if (spark.how && spark.how.summary) parts.push(spark.how.summary);
+  if (spark.why) parts.push(spark.why);
+
+  // V1 fallback fields (for old data without six dimensions)
+  if (parts.length === 0) {
+    if (spark.domain) parts.push(spark.domain);
+    if (spark.content) parts.push(spark.content);
+    if (spark.card && spark.card.heuristic) parts.push(spark.card.heuristic);
+  }
+
+  // Shared fields
   if (spark.summary) parts.push(spark.summary);
   if (spark.insight) {
     if (typeof spark.insight === 'string') {
@@ -102,7 +120,6 @@ function sparkToText(spark) {
       parts.push(spark.insight.rules.join(' '));
     }
   }
-  if (spark.card && spark.card.heuristic) parts.push(spark.card.heuristic);
   if (Array.isArray(spark.tags)) parts.push(spark.tags.join(' '));
   if (Array.isArray(spark.keywords)) parts.push(spark.keywords.join(' '));
   return parts.join(' ');

@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 
-const STP_SCHEMA_VERSION = '1.0.0';
+const STP_SCHEMA_VERSION = '2.0.0';
+const STP_SCHEMA_VERSION_LEGACY = '1.0.0';
 
 function canonicalize(obj) {
   if (obj === null || obj === undefined) return 'null';
@@ -26,6 +27,15 @@ function canonicalize(obj) {
 
 function computeAssetId(obj, excludeFields) {
   if (!obj || typeof obj !== 'object') return null;
+
+  // V2: use when.trigger + how.summary as hash input for content-addressed ID
+  if (obj.when && obj.when.trigger && obj.how && obj.how.summary) {
+    var coreText = String(obj.when.trigger) + '|' + String(obj.how.summary);
+    var coreHash = crypto.createHash('sha256').update(coreText, 'utf8').digest('hex');
+    return 'sha256:' + coreHash;
+  }
+
+  // V1 fallback: hash entire object (minus excluded fields)
   var exclude = new Set(Array.isArray(excludeFields) ? excludeFields : ['asset_id']);
   var clean = {};
   for (var k of Object.keys(obj)) {
@@ -56,6 +66,7 @@ function getNodeId() {
 
 module.exports = {
   STP_SCHEMA_VERSION,
+  STP_SCHEMA_VERSION_LEGACY,
   canonicalize,
   computeAssetId,
   verifyAssetId,

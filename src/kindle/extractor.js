@@ -26,6 +26,91 @@ var STATUS_RULES = {
   unconfirmed: 'pending_verification',
 };
 
+// Build six-dimension Core Layer fields from input params.
+// Accepts both new format (params.when/where/why/how/result/not) and legacy (params.card).
+function buildSixDimensions(params) {
+  var domain = params.domain || 'general';
+  var domainParts = domain.split('.');
+
+  // WHEN
+  var when = params.when || {};
+  var trigger = when.trigger || params.trigger || '';
+  var conditions = when.conditions || [];
+
+  // WHERE
+  var where = params.where || {};
+  var ce = (params.card || {}).context_envelope || {};
+  var whereDomain = where.domain || ce.domain || domainParts[0] || '';
+  var whereSubDomain = where.sub_domain || ce.sub_domain || domainParts.slice(1).join('.') || '';
+  var whereScenario = where.scenario || '';
+  var whereAudience = where.audience || ce.audience_type || '';
+
+  // WHY
+  var why = params.why || '';
+
+  // HOW
+  var how = params.how || {};
+  var howSummary = how.summary || (params.card || {}).heuristic || '';
+  var howDetail = how.detail || params.content || '';
+
+  // RESULT
+  var result = params.result || {};
+  var expectedOutcome = result.expected_outcome || '';
+  var feedbackLog = result.feedback_log || [];
+
+  // NOT
+  var not = params.not || [];
+  var cardBoundaries = (params.card || {}).boundary_conditions || [];
+  if (not.length === 0 && cardBoundaries.length > 0) {
+    not = cardBoundaries.map(function(b) {
+      if (typeof b === 'string') return { condition: b, effect: 'skip', reason: '' };
+      return { condition: b.condition || '', effect: b.effect || 'skip', reason: b.reason || '' };
+    });
+  }
+
+  // knowledge_type
+  var knowledgeType = params.knowledge_type
+    || (params.card || {}).heuristic_type
+    || 'rule';
+  if (knowledgeType === 'boundary') knowledgeType = 'rule';
+
+  // If trigger is empty, derive from howSummary or content
+  if (!trigger && howSummary) trigger = howSummary;
+  if (!trigger && howDetail) trigger = howDetail.slice(0, 100);
+
+  return {
+    knowledge_type: knowledgeType,
+    when: { trigger: trigger, conditions: conditions },
+    where: { domain: whereDomain, sub_domain: whereSubDomain, scenario: whereScenario, audience: whereAudience },
+    why: why,
+    how: { summary: howSummary, detail: howDetail },
+    result: { expected_outcome: expectedOutcome, feedback_log: feedbackLog },
+    not: not,
+  };
+}
+
+// Generate legacy card structure from six-dimension fields for backward compatibility.
+function buildCardFromSixDimensions(dims) {
+  return {
+    heuristic: dims.how.summary,
+    heuristic_type: dims.knowledge_type,
+    context_envelope: {
+      domain: dims.where.domain,
+      sub_domain: dims.where.sub_domain,
+      audience_type: dims.where.audience,
+      platform: [],
+      task_phase: '',
+      prerequisites: [],
+      extra: dims.where.scenario ? { scenario: dims.where.scenario } : {},
+    },
+    boundary_conditions: dims.not.map(function(n) {
+      return { condition: n.condition || '', effect: n.effect || 'do_not_apply', reason: n.reason || '' };
+    }),
+    preference_dimensions: [],
+    evidence: { practice_count: 0, success_rate: null },
+  };
+}
+
 function buildCard(params) {
   var card = params.card || {};
   return {
@@ -39,7 +124,15 @@ function buildCard(params) {
 }
 
 function buildContributor(params) {
-  if (params.contributor) return params.contributor;
+  if (params.contributor) {
+    var existing = params.contributor;
+    if (params.contributor_focus && !existing.focus) {
+      existing.focus = Array.isArray(params.contributor_focus)
+        ? params.contributor_focus
+        : [params.contributor_focus];
+    }
+    return existing;
+  }
   var source = params.source || 'human_teaching';
   if (source === 'web_exploration' || source === 'agent_exchange' || source === 'self_diagnosis') {
     return { type: 'agent', id: getNodeId() };
@@ -52,7 +145,13 @@ function buildContributor(params) {
     else if (years >= 2) expertise = 0.5;
     else expertise = 0.3;
   }
-  return { type: 'human', id: params.contributor_id || 'unknown', domain_expertise: expertise };
+  var contributor = { type: 'human', id: params.contributor_id || 'unknown', domain_expertise: expertise };
+  if (params.contributor_focus) {
+    contributor.focus = Array.isArray(params.contributor_focus)
+      ? params.contributor_focus
+      : [params.contributor_focus];
+  }
+  return contributor;
 }
 
 function createRawSpark(params) {
@@ -70,6 +169,9 @@ function createRawSpark(params) {
     confidence = Math.min(1.0, (SOURCE_INITIAL_CONFIDENCE.human_teaching || 0.50) + BOOST_RULES.human_confirmed);
   }
 
+  // Build six-dimension Core Layer
+  var dims = buildSixDimensions(params);
+
   var spark = {
     type: 'RawSpark',
     schema_version: STP_SCHEMA_VERSION,
@@ -77,21 +179,36 @@ function createRawSpark(params) {
     source: source,
     extraction_method: params.extraction_method || source,
     domain: params.domain || 'general',
-    content: params.content || '',
-    card: buildCard(params),
+
+    // ── Core Layer: six dimensions ──
+    knowledge_type: dims.knowledge_type,
+    when: dims.when,
+    where: dims.where,
+    why: dims.why,
+    how: dims.how,
+    result: dims.result,
+    not: dims.not,
+
+    // ── Lifecycle Layer ──
     confidence: parseFloat(confidence.toFixed(2)),
     confirmation_status: confirmationStatus,
     status: status,
+    relations: params.relations || [],
+
+    // ── System Layer ──
     contributor: buildContributor(params),
     practice_count: 0,
     success_count: 0,
     visibility: params.visibility || 'private',
     tags: params.tags || [],
-    relations: params.relations || [],
     created_at: new Date().toISOString(),
+
+    // ── Compatibility Layer (auto-generated) ──
+    content: dims.how.detail || dims.how.summary,
+    card: buildCardFromSixDimensions(dims),
   };
 
-  if (params.trigger) spark.trigger = params.trigger;
+  if (dims.when.trigger) spark.trigger = dims.when.trigger;
   if (params.context) spark.context = params.context;
   if (params.related_session) spark.related_session = params.related_session;
 
@@ -176,6 +293,8 @@ function extractFromAgentExchange(params) {
 
 module.exports = {
   createRawSpark: createRawSpark,
+  buildSixDimensions: buildSixDimensions,
+  buildCardFromSixDimensions: buildCardFromSixDimensions,
   extractFromTeaching: extractFromTeaching,
   extractFromFeedback: extractFromFeedback,
   extractFromTaskNegotiation: extractFromTaskNegotiation,

@@ -169,4 +169,152 @@ function migrateAll() {
   return results;
 }
 
-module.exports = { migrateNotes, migrateSparks, migrateAll };
+// ── V2 Migration: add six-dimension fields to existing sparks ──
+
+var KNOWLEDGE_TYPE_MAP = {
+  rule: 'rule',
+  preference: 'preference',
+  pattern: 'pattern',
+  lesson: 'lesson',
+  boundary: 'rule',
+  methodology: 'methodology',
+};
+
+var EFFECT_MAP = {
+  do_not_apply: 'skip',
+  skip: 'skip',
+  modify: 'modify',
+  warn: 'warn',
+  apply: 'skip',
+  best_practice: 'skip',
+  recommended: 'skip',
+};
+
+function migrateSparkToV2(spark) {
+  if (spark.schema_version === '2.0.0') return spark;
+
+  var card = spark.card || {};
+  var ce = card.context_envelope || {};
+  var domainStr = spark.domain || 'general';
+  var domainParts = domainStr.split('.');
+
+  // WHEN
+  spark.when = {
+    trigger: spark.trigger || card.heuristic || (spark.content || '').slice(0, 100) || '',
+    conditions: extractConditionsFromExtra(ce.extra),
+  };
+
+  // WHERE
+  spark.where = {
+    domain: ce.domain || domainParts[0] || '',
+    sub_domain: ce.sub_domain || domainParts.slice(1).join('.') || '',
+    scenario: flattenExtra(ce.extra),
+    audience: ce.audience_type || '',
+  };
+
+  // WHY — old data doesn't have it
+  spark.why = spark.why || '';
+
+  // HOW
+  spark.how = {
+    summary: card.heuristic || '',
+    detail: spark.content || '',
+  };
+
+  // RESULT
+  spark.result = {
+    expected_outcome: '',
+    feedback_log: [],
+  };
+
+  // NOT
+  var boundaries = card.boundary_conditions || [];
+  spark.not = boundaries.map(function(b) {
+    if (typeof b === 'string') return { condition: b, effect: 'skip', reason: '' };
+    return {
+      condition: b.condition || '',
+      effect: EFFECT_MAP[b.effect] || 'skip',
+      reason: b.reason || '',
+    };
+  });
+
+  // knowledge_type
+  spark.knowledge_type = KNOWLEDGE_TYPE_MAP[card.heuristic_type] || 'rule';
+
+  spark.schema_version = '2.0.0';
+  return spark;
+}
+
+function extractConditionsFromExtra(extra) {
+  if (!extra || typeof extra !== 'object') return [];
+  var conditions = [];
+  for (var k in extra) {
+    var val = extra[k];
+    if (typeof val === 'string' && val.length > 0 && val.length < 60) {
+      conditions.push(val);
+    } else if (Array.isArray(val)) {
+      for (var i = 0; i < val.length; i++) {
+        if (typeof val[i] === 'string' && val[i].length < 60) conditions.push(val[i]);
+      }
+    }
+  }
+  return conditions;
+}
+
+function flattenExtra(extra) {
+  if (!extra || typeof extra !== 'object') return '';
+  var parts = [];
+  for (var k in extra) {
+    var val = extra[k];
+    if (typeof val === 'string' && val.length > 0) {
+      parts.push(val);
+    } else if (Array.isArray(val)) {
+      parts.push(val.join('、'));
+    }
+  }
+  return parts.join('；');
+}
+
+// Batch migrate all raw sparks in the JSONL file
+function migrateAllToV2() {
+  var stpDir = getStpAssetsDir();
+  var rawPath = path.join(stpDir, 'raw_sparks', 'raw_sparks.jsonl');
+  if (!fs.existsSync(rawPath)) return { migrated: 0, total: 0, error: 'no raw sparks file' };
+
+  var raw = fs.readFileSync(rawPath, 'utf8');
+  var lines = raw.split('\n').filter(Boolean);
+  var migrated = 0;
+  var total = lines.length;
+  var outputLines = [];
+
+  for (var i = 0; i < lines.length; i++) {
+    try {
+      var spark = JSON.parse(lines[i]);
+      if (spark.schema_version !== '2.0.0') {
+        spark = migrateSparkToV2(spark);
+        migrated++;
+      }
+      outputLines.push(JSON.stringify(spark));
+    } catch (e) {
+      outputLines.push(lines[i]);
+    }
+  }
+
+  fs.writeFileSync(rawPath, outputLines.join('\n') + '\n');
+
+  // Also migrate snapshot if it exists
+  var snapshotPath = path.join(stpDir, 'raw_sparks', 'raw_sparks_snapshot.json');
+  if (fs.existsSync(snapshotPath)) {
+    try {
+      var snapshot = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'));
+      if (Array.isArray(snapshot)) {
+        snapshot = snapshot.map(migrateSparkToV2);
+        fs.writeFileSync(snapshotPath, JSON.stringify(snapshot, null, 2));
+      }
+    } catch (e) { /* skip */ }
+  }
+
+  return { migrated: migrated, total: total };
+}
+
+module.exports = { migrateNotes, migrateSparks, migrateAll, migrateSparkToV2, migrateAllToV2 };

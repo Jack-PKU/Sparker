@@ -109,10 +109,15 @@ function discoverAllBoundaries() {
     if (!spark) continue;
 
     // Add new boundaries (avoid duplicates)
+    // V2: also populate spark.not array
     if (!spark.card) spark.card = {};
     if (!spark.card.boundary_conditions) spark.card.boundary_conditions = [];
+    if (!spark.not) spark.not = [];
     var existingConds = spark.card.boundary_conditions.map(function (bc) {
       return (bc.condition || '').toLowerCase();
+    });
+    var existingNotConds = spark.not.map(function (n) {
+      return (n.condition || '').toLowerCase();
     });
 
     var added = [];
@@ -122,6 +127,15 @@ function discoverAllBoundaries() {
         spark.card.boundary_conditions.push(candidates[ci]);
         existingConds.push(candCond);
         added.push(candidates[ci]);
+      }
+      // V2: sync to spark.not array
+      if (existingNotConds.indexOf(candCond) === -1) {
+        spark.not.push({
+          condition: candidates[ci].condition,
+          effect: candidates[ci].effect || 'do_not_apply',
+          reason: candidates[ci].reason || ''
+        });
+        existingNotConds.push(candCond);
       }
     }
 

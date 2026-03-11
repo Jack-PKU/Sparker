@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { getNodeId } = require('../core/asset-id');
+const { STP_SCHEMA_VERSION, getNodeId } = require('../core/asset-id');
 const { getStpAssetsDir, ensureDir } = require('../core/storage');
 const { getBindingKey, getHubUrl, getAgentName } = require('./auth');
 
@@ -19,6 +19,7 @@ function buildMessage(params) {
   return {
     protocol: PROTOCOL_NAME,
     protocol_version: PROTOCOL_VERSION,
+    schema_version: STP_SCHEMA_VERSION,
     message_type: params.messageType,
     message_id: generateMessageId(),
     sender_id: params.senderId || getNodeId(),
@@ -28,11 +29,24 @@ function buildMessage(params) {
   };
 }
 
+// Normalize server response — handles both {payload: {...}} and flat response formats
+function unwrapResponse(httpResult) {
+  if (!httpResult || !httpResult.ok) return httpResult;
+  var data = httpResult.response || {};
+  if (data.payload && typeof data.payload === 'object') {
+    return Object.assign({}, httpResult, { response: data.payload });
+  }
+  return httpResult;
+}
+
 function buildPublishMessage(ember, opts) {
   var o = opts || {};
+  var payload = { spark: ember, action: o.action || 'create' };
+  if (o.category_id) payload.category_id = o.category_id;
+  if (o.category_path) payload.category_path = o.category_path;
   return buildMessage({
     messageType: 'spark_publish',
-    payload: { spark: ember, action: o.action || 'create' },
+    payload: payload,
   });
 }
 
@@ -96,40 +110,6 @@ function buildSyncMessage(opts) {
   });
 }
 
-// --- File transport ---
-
-function getA2aDir() {
-  return path.join(getStpAssetsDir(), 'a2a');
-}
-
-function fileTransportSend(message) {
-  var dir = path.join(getA2aDir(), 'outbox');
-  ensureDir(dir);
-  var filePath = path.join(dir, message.message_type + '.jsonl');
-  fs.appendFileSync(filePath, JSON.stringify(message) + '\n', 'utf8');
-  return { ok: true, path: filePath };
-}
-
-function fileTransportReceive() {
-  var dir = path.join(getA2aDir(), 'inbox');
-  if (!fs.existsSync(dir)) return [];
-  var files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl'));
-  var messages = [];
-  for (var i = 0; i < files.length; i++) {
-    try {
-      var raw = fs.readFileSync(path.join(dir, files[i]), 'utf8');
-      var lines = raw.split('\n').filter(Boolean);
-      for (var j = 0; j < lines.length; j++) {
-        try {
-          var msg = JSON.parse(lines[j]);
-          if (msg && msg.protocol === PROTOCOL_NAME) messages.push(msg);
-        } catch (e) { /* skip */ }
-      }
-    } catch (e) { /* skip */ }
-  }
-  return messages;
-}
-
 // --- HTTP transport ---
 
 function buildHttpHeaders() {
@@ -137,6 +117,10 @@ function buildHttpHeaders() {
   var bindingKey = getBindingKey();
   if (bindingKey) {
     headers['X-Sparkland-Binding-Key'] = bindingKey;
+  }
+  var nodeId = getNodeId();
+  if (nodeId) {
+    headers['X-Node-Id'] = nodeId;
   }
   return headers;
 }
@@ -172,15 +156,10 @@ async function httpTransportSend(message) {
   }
 }
 
-// --- Transport registry ---
-// Auto-detect: use HTTP when hub URL is configured, otherwise file.
-
+// Transport is always HTTP. When hub URL is not configured, send() returns error.
+// Failed sends are handled by the retry queue in publisher.js.
 function getTransport() {
-  var explicit = (process.env.STP_TRANSPORT || process.env.SPARK_TRANSPORT || '').toLowerCase();
-  if (explicit === 'file') return { send: fileTransportSend, receive: fileTransportReceive };
-  if (explicit === 'http') return { send: httpTransportSend, receive: async () => [] };
-  if (getHubUrl()) return { send: httpTransportSend, receive: async () => [] };
-  return { send: fileTransportSend, receive: fileTransportReceive };
+  return { send: httpTransportSend };
 }
 
 async function sendToHub(message) {
@@ -196,41 +175,97 @@ async function hubSearch(query, opts) {
 
   var message = buildSearchMessage(query, opts);
   var result = await httpTransportSend(message);
-  if (!result.ok) return { ok: false, error: result.error || 'Hub search failed', results: [] };
+
+  if (!result.ok) {
+    if (result.status === 402) {
+      var errResp = result.response || {};
+      return {
+        ok: false,
+        error: 'insufficient_balance',
+        message: errResp.message || 'Points balance is insufficient for search.',
+        balance: typeof errResp.balance === 'number' ? errResp.balance : null,
+        results: [],
+      };
+    }
+    return { ok: false, error: result.error || 'Hub search failed', network_error: !result.status, results: [] };
+  }
 
   var payload = result.response && result.response.payload ? result.response.payload : result.response;
   var sparks = payload.sparks || [];
 
   return {
     ok: true,
-    results: sparks.map(function (s) {
-      return {
-        id: s.id,
-        type: 'HubSpark',
-        domain: s.domain_id || s.domain,
-        summary: extractSummary(s),
-        score: s._score || s._effective_score || 0,
-        credibility: s.credibility_score || s._effective_score || 0,
-        source: 'hub',
-        hub_data: s,
-      };
-    }),
+    results: sparks.map(normalizeHubSpark),
     total: payload.total || sparks.length,
     threshold: payload.threshold_applied,
+    purchased_spark_ids: payload.purchased_spark_ids || [],
+    already_owned_ids: payload.already_owned_ids || [],
+    insufficient_at: payload.insufficient_at || null,
+    balance: typeof payload.balance === 'number' ? payload.balance : null,
   };
 }
 
+// Normalize a Hub spark into the same structure as local sparks (B2 fix)
+function normalizeHubSpark(s) {
+  var insight = parseInsight(s.insight);
+  var result = {
+    id: s.id,
+    type: 'HubSpark',
+    domain: s.domain_id || s.domain,
+    summary: s.how_summary || extractSummary(s),
+    score: s._score || s._effective_score || 0,
+    credibility: s.credibility_score || s._effective_score || 0,
+    source: 'hub',
+  };
+
+  // Extract six-dimension fields from Hub spark columns or insight JSON
+  if (s.when_trigger || s.when_data) {
+    result.when = { trigger: s.when_trigger || '' };
+    if (s.when_data) {
+      try { Object.assign(result.when, typeof s.when_data === 'string' ? JSON.parse(s.when_data) : s.when_data); } catch (e) {}
+    }
+  } else if (insight.when) {
+    result.when = insight.when;
+  }
+
+  if (s.how_summary || s.how_detail) {
+    result.how = { summary: s.how_summary || '', detail: s.how_detail || '' };
+  } else if (insight.how) {
+    result.how = insight.how;
+  }
+
+  if (s.why) {
+    result.why = s.why;
+  } else if (insight.why) {
+    result.why = insight.why;
+  }
+
+  if (s.not_data) {
+    try { result.not = typeof s.not_data === 'string' ? JSON.parse(s.not_data) : s.not_data; } catch (e) {}
+  } else if (insight.not) {
+    result.not = insight.not;
+  }
+
+  if (!result.summary && result.when && result.when.trigger && result.how && result.how.summary) {
+    result.summary = result.when.trigger + ' → ' + result.how.summary;
+  }
+
+  return result;
+}
+
+function parseInsight(insight) {
+  if (!insight) return {};
+  if (typeof insight === 'string') {
+    try { return JSON.parse(insight); } catch (e) { return {}; }
+  }
+  return insight;
+}
+
 function extractSummary(spark) {
-  if (typeof spark.insight === 'string') {
-    try {
-      var ins = JSON.parse(spark.insight);
-      return ins.summary || ins.detail || '';
-    } catch (e) { return spark.insight; }
-  }
-  if (spark.insight && typeof spark.insight === 'object') {
-    return spark.insight.summary || spark.insight.detail || '';
-  }
-  return '';
+  var insight = parseInsight(spark.insight);
+  return insight.summary || insight.detail
+    || (spark.how_summary ? spark.how_summary : '')
+    || spark.summary || '';
 }
 
 async function hubPublish(ember) {
@@ -256,6 +291,43 @@ async function hubSync(opts) {
   return httpTransportSend(message);
 }
 
+async function hubGetCategoryTree() {
+  var hubUrl = getHubUrl();
+  if (!hubUrl) return { ok: false, error: 'Hub not configured', tree: [] };
+
+  var endpoint = hubUrl.replace(/\/+$/, '') + '/api/categories/tree';
+  try {
+    var res = await fetch(endpoint, {
+      method: 'GET',
+      headers: buildHttpHeaders(),
+      signal: AbortSignal.timeout(10000),
+    });
+    var data = await res.json();
+    return { ok: res.ok, tree: data.tree || [], level_semantics: data.level_semantics || null };
+  } catch (err) {
+    return { ok: false, error: err.message, tree: [] };
+  }
+}
+
+function formatCategoryTree(tree, indent, levelSemantics) {
+  indent = indent || 0;
+  var lines = [];
+  if (indent === 0 && levelSemantics) {
+    lines.push('层级说明: L1=' + (levelSemantics.L1 || '') + ', L2=' + (levelSemantics.L2 || '') + ', L3=' + (levelSemantics.L3 || ''));
+    lines.push('---');
+  }
+  for (var i = 0; i < tree.length; i++) {
+    var node = tree[i];
+    var prefix = '';
+    for (var j = 0; j < indent; j++) prefix += '  ';
+    lines.push(prefix + '- ' + node.display_name + ' [id=' + node.id + ']');
+    if (node.children && node.children.length > 0) {
+      lines.push(formatCategoryTree(node.children, indent + 1));
+    }
+  }
+  return lines.join('\n');
+}
+
 module.exports = {
   PROTOCOL_NAME,
   PROTOCOL_VERSION,
@@ -266,6 +338,8 @@ module.exports = {
   buildForgeRequestMessage,
   buildRelateMessage,
   buildSyncMessage,
+  unwrapResponse,
+  normalizeHubSpark,
   getTransport,
   sendToHub,
   getHubUrl,
@@ -274,5 +348,7 @@ module.exports = {
   hubVote,
   hubFetch,
   hubSync,
+  hubGetCategoryTree,
+  formatCategoryTree,
   buildHttpHeaders,
 };

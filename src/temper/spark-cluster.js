@@ -57,6 +57,15 @@ function buildCluster(coreSpark, allSparks, relations) {
         cluster.refinements.push(related);
         var bc = (related.card && related.card.boundary_conditions) || [];
         for (var bci = 0; bci < bc.length; bci++) cluster.composite_boundaries.push(bc[bci]);
+        // V2: also collect boundaries from spark.not
+        var notArr = related.not || [];
+        for (var ni = 0; ni < notArr.length; ni++) {
+          cluster.composite_boundaries.push({
+            condition: notArr[ni].condition || '',
+            effect: notArr[ni].effect || 'do_not_apply',
+            reason: notArr[ni].reason || ''
+          });
+        }
         break;
       case 'supports':
         cluster.supporting.push(related);
@@ -79,15 +88,30 @@ function buildCluster(coreSpark, allSparks, relations) {
   }
 
   // Merge core's envelope with refinements' envelopes
-  var envelopes = [cluster.core.card && cluster.core.card.context_envelope].filter(Boolean);
+  // V2: also consider spark.where as context envelope source
+  var coreEnv = (cluster.core.card && cluster.core.card.context_envelope) || null;
+  if (!coreEnv && cluster.core.where) {
+    coreEnv = cluster.core.where;
+  }
+  var envelopes = [coreEnv].filter(Boolean);
   for (var ei = 0; ei < cluster.refinements.length; ei++) {
-    var env = cluster.refinements[ei].card && cluster.refinements[ei].card.context_envelope;
+    var env = (cluster.refinements[ei].card && cluster.refinements[ei].card.context_envelope)
+      || cluster.refinements[ei].where || null;
     if (env) envelopes.push(env);
   }
   cluster.composite_envelope = envelopes.length > 0 ? envelopes[0] : {};
 
   // Deduplicate boundary conditions
   var coreBc = (cluster.core.card && cluster.core.card.boundary_conditions) || [];
+  // V2: also include core's not array
+  var coreNot = cluster.core.not || [];
+  for (var cni = 0; cni < coreNot.length; cni++) {
+    coreBc.push({
+      condition: coreNot[cni].condition || '',
+      effect: coreNot[cni].effect || 'do_not_apply',
+      reason: coreNot[cni].reason || ''
+    });
+  }
   var allBc = coreBc.concat(cluster.composite_boundaries);
   var seen = {};
   cluster.composite_boundaries = [];

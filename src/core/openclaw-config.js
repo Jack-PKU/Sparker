@@ -124,16 +124,37 @@ function resolveEmbeddingConfig() {
     names = [primaryProvider].concat(names.filter(function (n) { return n !== primaryProvider; }));
   }
 
-  for (var i = 0; i < names.length; i++) {
-    var p = cfg.providers[names[i]];
+  // Prefer doubao/volcengine for embeddings (has native embedding models)
+  var ordered = names.slice();
+  var doubaoIdx = ordered.indexOf('doubao');
+  if (doubaoIdx > 0) {
+    ordered.splice(doubaoIdx, 1);
+    ordered.unshift('doubao');
+  }
+
+  for (var i = 0; i < ordered.length; i++) {
+    var p = cfg.providers[ordered[i]];
     if (p.baseUrl && p.apiKey) {
       var base = p.baseUrl.replace(/\/$/, '');
+
+      // Doubao / Volcengine ARK: use multimodal embedding endpoint
+      if (base.indexOf('volces.com') >= 0 || ordered[i] === 'doubao') {
+        base = base.replace(/\/api\/v3$/, '').replace(/\/v1$/, '');
+        return {
+          endpoint: base + '/api/v3/embeddings/multimodal',
+          apiKey: p.apiKey,
+          model: process.env.STP_EMBEDDING_MODEL || 'doubao-embedding-vision-251215',
+          provider: ordered[i],
+          derived: true,
+        };
+      }
+
       base = base.replace(/\/anthropic$/, '').replace(/\/v1$/, '');
       return {
         endpoint: base + '/v1/embeddings',
         apiKey: p.apiKey,
         model: 'default',
-        provider: names[i],
+        provider: ordered[i],
         derived: true,
       };
     }

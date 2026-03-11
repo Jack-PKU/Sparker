@@ -36,17 +36,20 @@ var TRANSCRIPT_PROMPT = [
   '9. **Workflow insights**: "The process should be X→Y→Z"',
   '10. **Audience/user insights**: "Users/customers actually think/do X"',
   '',
-  'For EACH insight, output a JSON object:',
-  '  heuristic        — one actionable sentence (the knowledge)',
-  '  heuristic_type   — "rule" | "preference" | "pattern" | "boundary" | "lesson" | "data_point"',
-  '  domain           — professional domain',
-  '  sub_domain       — specific area',
+  'For EACH insight, output a JSON object with the **six-dimension structure**:',
+  '',
+  '  knowledge_type   — "rule" | "preference" | "pattern" | "boundary" | "lesson" | "data_point"',
+  '  when             — { trigger: string (what triggers this knowledge),',
+  '                       conditions: string[] (preconditions for applicability) }',
+  '  where            — { domain: string, sub_domain: string, scenario: string, audience: string }',
+  '  why              — string (why this knowledge matters or works)',
+  '  how              — { summary: string (one-sentence action), detail: string (step-by-step if applicable) }',
+  '  result           — { expected_outcome: string }',
+  '  not              — array of { condition: string, effect: string, reason: string }',
+  '                     (when this does NOT apply)',
   '  speaker_role     — role of the person who said this (NEVER use real names)',
   '  speaker_alias    — stable pseudonym for this speaker within the transcript',
   '                     (use "Person_A", "Person_B", etc. — same person = same alias)',
-  '  context          — what situation or topic prompted this insight',
-  '  applicable_when  — array of conditions when this applies',
-  '  not_applicable_when — array of conditions when NOT applicable',
   '  evidence         — brief quote from the transcript (anonymize names to roles)',
   '  agreement_level  — "consensus" | "single_opinion" | "debated"',
   '',
@@ -203,34 +206,56 @@ async function extractFromTranscript(filePath, opts) {
   for (var i = 0; i < allInsights.length; i++) {
     var ins = allInsights[i];
 
+    // V2: extract six-dimension fields from LLM response
+    var insWhen = ins.when || {};
+    var insWhere = ins.where || {};
+    var insHow = ins.how || {};
+    var insNot = ins.not || [];
+    var insDomain = insWhere.domain || ins.domain || o.domain || 'general';
+    var insSubDomain = insWhere.sub_domain || ins.sub_domain || null;
+    var heuristic = (insHow.summary || ins.heuristic || '');
+    // Backward-compat: map not_applicable_when to not[] if LLM uses old format
+    if (insNot.length === 0 && Array.isArray(ins.not_applicable_when)) {
+      insNot = ins.not_applicable_when.map(function (c) {
+        return { condition: c, effect: 'not_applicable', reason: '' };
+      });
+    }
+
     var spark = createRawSpark({
       source: 'human_teaching',
       trigger: 'transcript_extraction: ' + path.basename(filePath),
-      content: ins.heuristic,
-      domain: ins.domain || o.domain || 'general',
+      content: heuristic,
+      domain: insDomain,
       extraction_method: 'transcript_extraction',
       confirmation_status: o.auto_confirm ? 'human_confirmed' : 'unconfirmed',
       confidence: o.auto_confirm ? 0.40 : 0.18,
       tags: [
-        ins.heuristic_type || 'rule',
-        ins.sub_domain,
+        ins.knowledge_type || ins.heuristic_type || 'rule',
+        insSubDomain,
         ins.agreement_level === 'consensus' ? 'consensus' : null,
       ].filter(Boolean),
+      when: { trigger: insWhen.trigger || heuristic, conditions: insWhen.conditions || ins.applicable_when || [] },
+      where: { domain: insDomain, sub_domain: insSubDomain, scenario: insWhere.scenario || '', audience: insWhere.audience || '' },
+      why: ins.why || '',
+      how: { summary: heuristic, detail: insHow.detail || '' },
+      result: { expected_outcome: (ins.result && ins.result.expected_outcome) || '' },
+      not: insNot,
+      knowledge_type: ins.knowledge_type || ins.heuristic_type || 'rule',
       card: {
-        heuristic: ins.heuristic,
-        heuristic_type: ins.heuristic_type || 'rule',
+        heuristic: heuristic,
+        heuristic_type: ins.knowledge_type || ins.heuristic_type || 'rule',
         context_envelope: {
-          domain: ins.domain || o.domain || 'general',
-          sub_domain: ins.sub_domain || null,
+          domain: insDomain,
+          sub_domain: insSubDomain,
           source_type: 'transcript',
           transcript_format: format,
           speaker_role: ins.speaker_role || null,
           speaker_alias: ins.speaker_alias || null,
         },
-        boundary_conditions: (ins.not_applicable_when || []).map(function (c) {
-          return { condition: c, effect: 'not_applicable', reason: '' };
+        boundary_conditions: insNot.map(function (n) {
+          return { condition: n.condition || '', effect: n.effect || 'not_applicable', reason: n.reason || '' };
         }),
-        applicable_when: ins.applicable_when || [],
+        applicable_when: insWhen.conditions || ins.applicable_when || [],
         evidence: ins.evidence ? {
           source_document: path.basename(filePath),
           quote: ins.evidence,

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 // Sparker CLI — STP knowledge extraction, refinement, search, and lifecycle.
-// Usage: echo '<json>' | node index.js <command> [options]
+// Usage: node index.js <command> --file=<json_path> [options]
+//    or: echo '<json>' | node index.js <command> [options]
 // Commands: kindle, teach, digest, search, publish, forge, ingest, profile, review,
 //           status, plan, post-task, report, strategy, login, register, bind, whoami, hub-url
 
@@ -16,6 +17,26 @@ function readStdin() {
   } catch (e) {
     return '';
   }
+}
+
+// Read JSON input: prefer --file flag over stdin to avoid shell escaping issues.
+// If --file is given, read from that path and optionally delete the temp file.
+function readJsonInput(flags) {
+  var filePath = flags.file || flags.input;
+  if (filePath) {
+    try {
+      var content = fs.readFileSync(path.resolve(filePath), 'utf8').trim();
+      var resolvedDir = path.dirname(path.resolve(filePath));
+      if (flags['cleanup'] !== false && (resolvedDir === '/tmp' || /^[A-Za-z]:\\tmp$/i.test(resolvedDir))) {
+        try { fs.unlinkSync(path.resolve(filePath)); } catch (e) { /* best-effort cleanup */ }
+      }
+      return content;
+    } catch (e) {
+      process.stderr.write('[sparker] Error reading --file=' + filePath + ': ' + e.message + '\n');
+      return '';
+    }
+  }
+  return readStdin();
 }
 
 function parseArgs() {
@@ -83,8 +104,11 @@ async function handleKindle(stdinData) {
     process.stderr.write('[sparker] Source auto-reclassified: ' + originalSource + ' → ' + params.source + '\n');
   }
 
-  if (params.card && (!params.card.heuristic || !String(params.card.heuristic).trim())) {
-    process.stderr.write('[sparker] Warning: card.heuristic is empty. Spark may have low search relevance.\n');
+  // V2 format: validate six-dimension fields
+  if (params.how && params.how.summary) {
+    // New format — no need for card.heuristic warning
+  } else if (params.card && (!params.card.heuristic || !String(params.card.heuristic).trim())) {
+    process.stderr.write('[sparker] Warning: card.heuristic / how.summary is empty. Spark may have low search relevance.\n');
   }
 
   if (typeof params.confidence !== 'number') {
@@ -132,6 +156,10 @@ async function handleKindle(stdinData) {
   }
 
   appendRawSpark(spark);
+  try {
+    require('./src/core/search-index').rebuildSearchIndex();
+    await require('./src/core/search-index').computeIndexEmbeddings();
+  } catch (e) { /* best-effort */ }
   console.log(JSON.stringify(spark));
 }
 
@@ -162,6 +190,12 @@ async function handleDigest(args) {
   if (args.flags.days) opts.days = Number(args.flags.days);
   if (args.flags['dry-run'] || args.flags.dryRun) opts.dryRun = true;
   var report = await runDigest(opts);
+  if (!opts.dryRun) {
+    try {
+      require('./src/core/search-index').rebuildSearchIndex();
+      await require('./src/core/search-index').computeIndexEmbeddings();
+    } catch (e) { /* best-effort */ }
+  }
   console.log(JSON.stringify(report));
 }
 
@@ -185,15 +219,38 @@ async function handleSearch(stdinData, args) {
 async function handlePublish(args) {
   var sparkId = args.positional[0];
   if (!sparkId) {
-    process.stderr.write('Usage: node index.js publish <refined_spark_id>\n');
+    process.stderr.write('Usage: node index.js publish <refined_spark_id> [--category-id=X] [--category-path=industry/domain/sub_direction]\n');
     process.exit(1);
   }
   var { publishEmber } = require('./src/transmit/publisher');
   var opts = {};
   if (args.flags.visibility) opts.visibility = args.flags.visibility;
   if (args.flags['owner-confirmed']) opts.ownerConfirmed = true;
+  if (args.flags['category-id']) opts.category_id = args.flags['category-id'];
+  if (args.flags['category-path']) {
+    var parts = args.flags['category-path'].split('/');
+    if (parts.length === 3) {
+      opts.category_path = { industry: parts[0], domain: parts[1], sub_direction: parts[2] };
+    }
+  }
   var result = await publishEmber(sparkId, opts);
   console.log(JSON.stringify(result));
+}
+
+async function handleCategories() {
+  var { hubGetCategoryTree, formatCategoryTree, getHubUrl } = require('./src/transmit/hub-client');
+  if (!getHubUrl()) {
+    process.stderr.write('[sparker] Hub URL not configured; cannot fetch categories.\n');
+    console.log(JSON.stringify({ ok: false, error: 'hub_not_configured', tree: [] }));
+    return;
+  }
+  var result = await hubGetCategoryTree();
+  if (!result.ok) {
+    console.log(JSON.stringify(result));
+    return;
+  }
+  var text = formatCategoryTree(result.tree, 0, result.level_semantics);
+  console.log(JSON.stringify({ ok: true, tree: result.tree, level_semantics: result.level_semantics || null, display: text }));
 }
 
 async function handleForge(args) {
@@ -234,6 +291,7 @@ async function handleProfile(args) {
 
 async function handleFeedback(stdinData, args) {
   var { hubVote, getHubUrl } = require('./src/transmit/hub-client');
+  var { enqueueRetry } = require('./src/transmit/publisher');
   if (!getHubUrl()) {
     process.stderr.write('[sparker] Hub URL not configured; feedback skipped.\n');
     console.log(JSON.stringify({ ok: false, error: 'hub_not_configured' }));
@@ -245,7 +303,8 @@ async function handleFeedback(stdinData, args) {
     try {
       params = JSON.parse(stdinData);
     } catch (e) {
-      process.stderr.write('Usage: echo \'{"type":"positive","emberIdsUsed":["spark_id"]}\' | node index.js feedback\n');
+      process.stderr.write('Usage: node index.js feedback <spark_id> [positive|negative] [reason]\n');
+      process.stderr.write('   or: node index.js feedback --file=<json_path>\n');
       process.exit(1);
     }
   } else if (pos.length >= 1) {
@@ -260,16 +319,44 @@ async function handleFeedback(stdinData, args) {
   if (!Array.isArray(ids)) ids = [ids];
   if (ids.length === 0) {
     process.stderr.write('Usage: node index.js feedback <spark_id> [positive|negative] [reason]\n');
-    process.stderr.write('   or: echo \'{"type":"positive","emberIdsUsed":["spark_id"]}\' | node index.js feedback\n');
+    process.stderr.write('   or: node index.js feedback --file=<json_path>\n');
     process.exit(1);
   }
   var results = [];
   for (var i = 0; i < ids.length; i++) {
     try {
       var r = await hubVote(ids[i], voteType, { reason: params.reason });
-      results.push({ id: ids[i], vote: voteType, ok: r && !r.error, response: r });
+      var httpOk = r && r.ok;
+      var responsePayload = (r && r.response) || {};
+      var voteResult = {
+        id: ids[i],
+        vote: voteType,
+        ok: httpOk,
+        is_new_vote: responsePayload.is_new_vote !== undefined ? responsePayload.is_new_vote : null,
+        credibility_after: responsePayload.credibility_score !== undefined ? responsePayload.credibility_score : null,
+        already_voted: responsePayload.already_voted || false,
+      };
+      if (!httpOk) {
+        voteResult.error = (r && r.error) || 'hub_error';
+        enqueueRetry({
+          type: 'vote',
+          spark_id: ids[i],
+          vote_type: voteType,
+          reason: params.reason || null,
+          error: voteResult.error,
+        });
+        process.stderr.write('[sparker] Vote failed for ' + ids[i] + ', queued for retry.\n');
+      }
+      results.push(voteResult);
     } catch (e) {
       results.push({ id: ids[i], vote: voteType, ok: false, error: e.message });
+      enqueueRetry({
+        type: 'vote',
+        spark_id: ids[i],
+        vote_type: voteType,
+        reason: params.reason || null,
+        error: e.message,
+      });
     }
   }
   console.log(JSON.stringify({ ok: results.every(function (x) { return x.ok; }), results: results }));
@@ -531,8 +618,8 @@ async function handleRegister(args) {
   console.log(JSON.stringify(result));
 }
 
-function handleBind(args) {
-  var { saveBindingKey, getIdentity } = require('./src/transmit/auth');
+async function handleBind(args) {
+  var { saveBindingKey, getIdentity, validateBindingKey } = require('./src/transmit/auth');
   var key = args.positional[0] || args.flags.key;
   if (!key) {
     process.stderr.write('Usage: node index.js bind <binding_key>\n');
@@ -541,12 +628,27 @@ function handleBind(args) {
   }
   saveBindingKey(key);
   var identity = getIdentity();
-  console.log(JSON.stringify({ ok: true, message: 'Binding key saved', identity: identity }));
+
+  // Validate connectivity after saving
+  var validation = await validateBindingKey();
+  var result = { ok: true, message: 'Binding key saved', identity: identity };
+  if (!validation.ok && validation.error === 'binding_key_invalid') {
+    result.warning = 'Binding key saved but hub returned ' + validation.status + '. The key may be invalid.';
+  } else if (!validation.ok && validation.error === 'network_error') {
+    result.warning = 'Binding key saved but hub is unreachable. Will validate on next request.';
+  }
+  console.log(JSON.stringify(result));
 }
 
-function handleWhoami() {
-  var { getIdentity } = require('./src/transmit/auth');
-  console.log(JSON.stringify(getIdentity()));
+async function handleWhoami(args) {
+  var { getIdentity, validateBindingKey } = require('./src/transmit/auth');
+  var identity = getIdentity();
+  if (args && args.flags.check) {
+    var validation = await validateBindingKey();
+    identity.hub_reachable = validation.ok || validation.reachable || false;
+    identity.validation = validation;
+  }
+  console.log(JSON.stringify(identity));
 }
 
 function handleHubUrl(args) {
@@ -561,14 +663,127 @@ function handleHubUrl(args) {
   console.log(JSON.stringify({ ok: true, hub_url: url }));
 }
 
+async function handleDailyReport() {
+  var storage = require('./src/core/storage');
+  var { readCapabilityMap } = require('./src/core/capability-map');
+  var { runDigest } = require('./src/temper/digest');
+
+  var report = await runDigest({ hours: 24 });
+  var capMap = readCapabilityMap();
+  var raw = storage.readRawSparks();
+  var refined = storage.readRefinedSparks();
+
+  var today = new Date().toISOString().split('T')[0];
+  var todayRaw = raw.filter(function (s) {
+    return s.created_at && s.created_at.startsWith(today);
+  });
+
+  var atRisk = raw.filter(function (s) {
+    return s.status === 'active' &&
+      s.confirmation_status === 'human_confirmed' &&
+      s.confidence < 0.35 && s.confidence > 0.10;
+  });
+
+  var capLines = [];
+  for (var d in capMap.domains) {
+    var dm = capMap.domains[d];
+    var bar = '';
+    var score = dm.score || 0;
+    var filled = Math.round(score * 10);
+    for (var i = 0; i < 10; i++) bar += i < filled ? '\u2588' : '\u2591';
+    capLines.push('  ' + d + '  ' + bar + ' ' + dm.status + ' (' + score.toFixed(2) + ')');
+    if (dm.sub_domains) {
+      for (var sd in dm.sub_domains) {
+        var sub = dm.sub_domains[sd];
+        var sbar = '';
+        var sscore = sub.score || 0;
+        var sfilled = Math.round(sscore * 10);
+        for (var si = 0; si < 10; si++) sbar += si < sfilled ? '\u2588' : '\u2591';
+        capLines.push('  \u251C\u2500\u2500 ' + sd + '  ' + sbar + ' ' + sub.status + ' (' + sscore.toFixed(2) + ')');
+      }
+    }
+  }
+
+  var newRefinedLines = [];
+  if (report && report.new_refined_sparks) {
+    for (var ri = 0; ri < report.new_refined_sparks.length; ri++) {
+      var rs = report.new_refined_sparks[ri];
+      newRefinedLines.push((ri + 1) + '. [' + rs.domain + '] ' + rs.summary);
+    }
+  }
+
+  var atRiskLines = [];
+  for (var ai = 0; ai < atRisk.length && ai < 5; ai++) {
+    var ar = atRisk[ai];
+    var heuristic = (ar.card && ar.card.heuristic) || ar.content || '';
+    var age = Math.round((Date.now() - new Date(ar.created_at).getTime()) / 86400000);
+    atRiskLines.push('- [' + ar.domain + '] "' + heuristic.slice(0, 60) + '" \u2014 ' + age + '\u5929\u672a\u4f7f\u7528');
+  }
+
+  var output = {
+    type: 'daily_report',
+    date: today,
+    summary: {
+      new_raw_today: todayRaw.length,
+      new_refined: newRefinedLines.length,
+      total_raw: raw.length,
+      total_refined: refined.length,
+      at_risk_count: atRisk.length,
+    },
+    new_refined: newRefinedLines,
+    capability_map: capLines,
+    at_risk: atRiskLines,
+    digest_skipped: report && report.skipped ? true : false,
+  };
+
+  console.log(JSON.stringify(output));
+}
+
+function handleMigrate(args) {
+  var { migrateAllToV2 } = require('./src/ops/migration');
+  var result = migrateAllToV2();
+  console.log(JSON.stringify(result));
+}
+
+async function handleRebuildIndex(args) {
+  var { rebuildSearchIndex, computeIndexEmbeddings } = require('./src/core/search-index');
+  var { isEmbeddingAvailable } = require('./src/core/embedding');
+  var index = rebuildSearchIndex();
+  var embResult = null;
+  var skipEmb = args && args.flags && args.flags['no-embeddings'];
+  if (!skipEmb && isEmbeddingAvailable()) {
+    embResult = await computeIndexEmbeddings();
+  }
+  console.log(JSON.stringify({
+    ok: true,
+    entries: index.entries.length,
+    df_terms: Object.keys(index.df).length,
+    built_at: index.built_at,
+    embeddings: embResult || { skipped: true, reason: skipEmb ? 'flag' : 'no_config' },
+  }));
+}
+
+async function handleRetry() {
+  var { processRetryQueue, readRetryQueue } = require('./src/transmit/publisher');
+  var queue = readRetryQueue();
+  if (queue.length === 0) {
+    console.log(JSON.stringify({ ok: true, message: 'Retry queue is empty', processed: 0, remaining: 0 }));
+    return;
+  }
+  process.stderr.write('[sparker] Processing ' + queue.length + ' retry queue entries...\n');
+  var result = await processRetryQueue();
+  console.log(JSON.stringify(result));
+}
+
 async function main() {
   var args = parseArgs();
   var stdinData = '';
 
-  if (args.command === 'kindle' || args.command === 'search' || args.command === 'review' || args.command === 'post-task') {
-    stdinData = readStdin();
+  var jsonInputCommands = ['kindle', 'search', 'review', 'post-task'];
+  if (jsonInputCommands.indexOf(args.command) !== -1) {
+    stdinData = readJsonInput(args.flags);
   } else if (args.command === 'feedback' && (!args.positional || args.positional.length === 0)) {
-    stdinData = readStdin();  // only read stdin when no positional args (avoids blocking)
+    stdinData = readJsonInput(args.flags);
   }
 
   switch (args.command) {
@@ -586,6 +801,9 @@ async function main() {
       break;
     case 'publish':
       await handlePublish(args);
+      break;
+    case 'categories':
+      await handleCategories();
       break;
     case 'forge':
       await handleForge(args);
@@ -624,13 +842,25 @@ async function main() {
       await handleRegister(args);
       break;
     case 'bind':
-      handleBind(args);
+      await handleBind(args);
       break;
     case 'whoami':
-      handleWhoami();
+      await handleWhoami(args);
+      break;
+    case 'daily-report':
+      await handleDailyReport();
       break;
     case 'hub-url':
       handleHubUrl(args);
+      break;
+    case 'migrate':
+      handleMigrate(args);
+      break;
+    case 'retry':
+      await handleRetry();
+      break;
+    case 'rebuild-index':
+      await handleRebuildIndex(args);
       break;
     default:
       process.stderr.write('Sparker CLI — STP knowledge engine\n\n');
@@ -641,20 +871,23 @@ async function main() {
       process.stderr.write('  whoami      Show current identity (node_id, agent, hub status)\n');
       process.stderr.write('  hub-url     Show or set SparkLand URL\n\n');
       process.stderr.write('Knowledge:\n');
-      process.stderr.write('  kindle      Capture a spark from stdin (JSON)\n');
+      process.stderr.write('  kindle      Capture a spark (--file=<json_path> or stdin)\n');
       process.stderr.write('  teach       Start structured extraction session\n');
       process.stderr.write('  ingest      Import from file/directory\n');
       process.stderr.write('  search      Search local + hub knowledge\n');
       process.stderr.write('  publish     Publish RefinedSpark as Ember to hub\n');
-      process.stderr.write('  feedback    Send vote (positive/negative) to hub for used sparks (JSON stdin)\n');
+      process.stderr.write('  categories  Fetch category tree from SparkHub (for pre-classification)\n');
+      process.stderr.write('  feedback    Send vote (positive/negative) to hub for used sparks\n');
       process.stderr.write('  digest      Run periodic review\n');
       process.stderr.write('  forge       Crystallize Ember into Gene\n\n');
       process.stderr.write('Info:\n');
-      process.stderr.write('  status      Show STP status and hub connection\n');
-      process.stderr.write('  report      Generate capability report\n');
-      process.stderr.write('  profile     View domain preference profile\n');
-      process.stderr.write('  strategy    Show adaptive learning strategy\n');
-      process.stderr.write('  review      Review pending embers\n');
+      process.stderr.write('  status        Show STP status and hub connection\n');
+      process.stderr.write('  report        Generate capability report\n');
+      process.stderr.write('  daily-report    Daily learning summary (for cron)\n');
+      process.stderr.write('  profile         View domain preference profile\n');
+      process.stderr.write('  strategy        Show adaptive learning strategy\n');
+      process.stderr.write('  review          Review pending embers\n');
+      process.stderr.write('  rebuild-index   Rebuild search index for faster queries\n');
       process.exit(1);
   }
 }

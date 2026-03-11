@@ -22,11 +22,19 @@ function discoverContextDimensions(domain) {
   // Standard fields that are always present — don't count these
   var standardFields = { domain: true, sub_domain: true };
 
-  // Count field occurrences
+  // Count field occurrences — check both V1 (task_context_envelope) and V2 (where)
   var fieldCounts = {};
   var fieldValues = {};
   for (var i = 0; i < domainRecords.length; i++) {
     var env = domainRecords[i].task_context_envelope;
+    // V2: merge where fields into the envelope for analysis
+    var whereObj = domainRecords[i].where;
+    if (whereObj && typeof whereObj === 'object') {
+      if (!env) env = {};
+      if (whereObj.scenario && !env.scenario) env.scenario = whereObj.scenario;
+      if (whereObj.audience && !env.audience) env.audience = whereObj.audience;
+    }
+    if (!env) continue;
     for (var key in env) {
       if (standardFields[key]) continue;
       if (env[key] === null || env[key] === undefined) continue;

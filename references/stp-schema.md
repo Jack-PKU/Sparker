@@ -53,6 +53,28 @@ The adaptive strategy is automatic — it reads the capability map and adjusts p
 | Auto explore | yes | if score<0.5 | no |
 | Ask human | yes | if score<0.6 | no |
 
+## RawSpark Six-Dimension Fields (schema_version 2.0.0)
+
+All RawSparks now include six structured dimensions in addition to legacy fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `knowledge_type` | `rule\|preference\|pattern\|lesson\|methodology` | Experience classification |
+| `when.trigger` | string | What need/task triggers this experience |
+| `when.conditions` | string[] | Additional qualifying conditions |
+| `where.domain` | string | Primary domain |
+| `where.sub_domain` | string | Sub-domain |
+| `where.scenario` | string | Environment description (free text) |
+| `where.audience` | string | Target audience |
+| `why` | string | Causal chain + comparative reasoning |
+| `how.summary` | string | One-line actionable rule |
+| `how.detail` | string | Expanded description with steps |
+| `result.expected_outcome` | string | Expected effect (quantify if possible) |
+| `result.feedback_log` | object[] | Usage feedback records |
+| `not[]` | object[] | When NOT to apply: `{condition, effect, reason}` |
+
+Legacy fields (`content`, `card.heuristic`, `card.context_envelope`, `card.boundary_conditions`) are auto-generated from six dimensions for backward compatibility.
+
 ## Spark Status Lifecycle
 
 | Status | Meaning | Can be promoted? |

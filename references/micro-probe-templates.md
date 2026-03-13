@@ -1,53 +1,27 @@
-# Micro-Probe Templates
+# 微追问模板
 
-Embed ONE micro-probe at the **end** of your normal reply — never as a standalone message.
-Tone should be casual, like a friend asking offhand. Include a brief reason ("so I can get it right next time").
+在正常回复**末尾**嵌入一个微追问——语气随意，像顺嘴一问。
 
-## Scenario 1: User picked from multiple options
+## 用户选了方案时
 
-**Template A — Dimension confirmation:**
-```
-Got it, going with {option}. Was it more about {dimension X} or {dimension Y}? Just so I nail it next time.
-```
+- **维度确认**：选了 {X}。主要是考虑 {维度A} 还是 {维度B}？下次好直接对准。
+- **通用性**：用 {X}。这是你一直的偏好，还是这次特殊？
+- **反向探测**：明白。如果 {另一个方案} 的 {某方面} 调一下，会考虑吗？
 
-**Template B — Generality check:**
-```
-Noted, using {option}. Is this your general preference for this kind of project, or specific to this one?
-```
+## 用户纠正时
 
-**Template C — Reverse probe:**
-```
-Makes sense. If {other option}'s {aspect} were tweaked, would you consider it? Just trying to pin down the key factor.
-```
+- **边界探测**：学到了！"{纠正内容}" 在所有 {场景} 都适用吗，还是有例外？
+- **原因探测**：明白。主要是因为 {假设A}，还是 {假设B}？
 
-## Scenario 2: User corrected your output
+## 用户随口分享时
 
-**Template D — Boundary probe:**
-```
-Learned! Does "{correction}" apply to all {context}, or are there exceptions?
-```
+- **范围确认**：你提到 "{洞见}"——在 {更大范围} 也成立吗？
+- **例外确认**：有意思。有没有 "{洞见}" 不适用的情况？
 
-**Template E — Cause probe:**
-```
-Got it. Mainly because of {hypothesis A}, or {hypothesis B}?
-```
+## 规则
 
-## Scenario 3: User casually shared an insight
-
-**Template F — Scope check:**
-```
-You mentioned "{insight}" — does that hold true for {broader scope} too?
-```
-
-**Template G — Exception check:**
-```
-Interesting. Any situation where "{insight}" wouldn't apply?
-```
-
-## Rules
-
-1. **Max 1 probe** per interaction (controlled by budget)
-2. Must be embedded at the end of a normal reply, not standalone
-3. Prefer binary / confirmation questions (answerable in 2 seconds)
-4. If user ignored or declined the previous probe, **skip this time**
-5. Sparks from probe answers: `source: "micro_probe"`, confidence 0.40, `confirmation_status: "human_confirmed"`
+1. 每次对话最多问 1 个（按预算控制）
+2. 必须嵌在正常回复末尾，不要单独发
+3. 优先二选一 / 确认式问题（2 秒能答）
+4. 用户上次忽略了追问 → 这次跳过
+5. 回答入库：`source: "micro_probe"`, confidence 0.40

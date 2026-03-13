@@ -1,138 +1,94 @@
-# 11 Capture Techniques
+# 采火参考手册
 
-## Quick Reference
+## 来源分类与置信度
 
-| # | Technique | source field | Trigger | confidence | extraction_method |
-|---|-----------|-------------|---------|-----------|------------------|
-| 1 | Task-embedded learning | `task_negotiation` | User gives standards during a task | 0.35 | `task_negotiation` |
-| 2 | Correction extraction | `human_feedback` | User corrects agent output | 0.40 | `feedback` |
-| 3 | Casual signal mining | `casual_mining` | User casually mentions expertise | 0.25 | `casual_mining` |
-| 4 | Iterative refinement arc | `iterative_refinement` | Final confirmation after multi-round edits | min(0.60, 0.35+n×0.05) | `iterative_refinement` |
-| 5 | Micro-probe | `micro_probe` | Agent embeds a follow-up question | 0.40 | `micro_probe` |
-| 6 | Comparative collection | `human_choice` | User picks from A/B options | 0.30 | `feedback` |
-| 7 | Preference profiling | — | Auto after 15+ sparks | — | `preference_profiling` |
-| 8 | Review-based validation | `human_feedback` | User reviews community sparks | 0.40 | `review` |
-| 9 | Document ingestion | `document_ingestion` | User uploads files | 0.30~0.55 | `document_ingestion` |
-| 10 | Transcript extraction | `transcript_extraction` | User uploads meeting notes | 0.30~0.45 | `transcript_extraction` |
-| 11 | Structured teaching | `human_teaching` | User says "let me teach you" | 0.70 | `teaching` |
+| # | 策略 | source | 触发信号 | 初始置信度 |
+|---|------|--------|---------|-----------|
+| 1 | 任务中标准 | `task_negotiation` | 用户布置任务时提出要求 | 0.35 |
+| 2 | 纠正提取 | `human_feedback` | 用户说"不对""改成""应该是" | 0.40 |
+| 3 | 闲聊挖掘 | `casual_mining` | 非任务对话中随口提到专业知识 | 0.25 |
+| 4 | 多轮迭代综合 | `iterative_refinement` | 多轮修改后用户确认"可以了" | min(0.60, 0.35+n×0.05) |
+| 5 | 微追问 | `micro_probe` | Agent 结尾追问，用户回答 | 0.40 |
+| 6 | 比较式采集 | `human_choice` | Agent 给 A/B 方案，用户选了一个 | 0.30 |
+| 7 | 偏好画像 | — | 15+ 条火种后自动生成 | — |
+| 8 | 社区知识评审 | `human_feedback` | 用户评价社区火种 | 0.40 |
+| 9 | 文档导入 | `document_ingestion` | 用户上传文件 | 0.30~0.55 |
+| 10 | 会议记录提取 | `transcript_extraction` | 用户上传会议纪要 | 0.30~0.45 |
+| 11 | 结构化教学 | `human_teaching` | 用户说"教你""训练你" | 0.70 |
 
-## Source → Scenario Mapping (by priority)
+**分类决策树**：明确教学 → `human_teaching` ▸ 纠正 → `human_feedback` ▸ 任务中标准 → `task_negotiation` ▸ 多轮最终确认 → `iterative_refinement` ▸ 回应追问 → `micro_probe` ▸ 选了 A/B → `human_choice` ▸ 闲聊 → `casual_mining`
 
-1. User says "let me teach you" → `human_teaching`
-2. User corrects output ("wrong" / "change to" / "should be") → `human_feedback`
-3. User gives standards during task execution → `task_negotiation`
-4. Final confirmation after multi-round edits ("ok, looks good") → `iterative_refinement`
-5. Agent probes, user answers → `micro_probe`
-6. User picks from A/B options → `human_choice`
-7. Casual expertise sharing (no task, no teaching) → `casual_mining`
-8. Agent's own web search → `web_exploration`
+---
 
-## Kindle Templates by Source
+## 火种六维结构
 
-> All templates use the six-dimension schema. Legacy V1 fields are auto-generated for backward compatibility.
-
-### task_negotiation (standards given during a task)
-```bash
-cat > /tmp/spark_tn.json << 'EOF'
+```json
 {
-  "source": "task_negotiation",
-  "domain": "<domain>",
-  "knowledge_type": "rule",
-  "when": { "trigger": "<task context>", "conditions": ["<qualifying condition>"] },
-  "where": { "scenario": "<environment>", "audience": "<target>" },
-  "why": "<causal reasoning>",
-  "how": { "summary": "<one-line rule>", "detail": "<expanded steps>" },
-  "result": { "expected_outcome": "<expected effect>" },
-  "not": [{ "condition": "<exception>", "effect": "skip|modify|warn", "reason": "<why>" }],
-  "confirmation_status": "human_confirmed"
+  "source": "<来源>",
+  "domain": "<点分隔领域，如 咖啡烘焙.冲煮参数>",
+  "knowledge_type": "rule|preference|pattern|lesson|methodology",
+  "when":   { "trigger": "<激活场景>", "conditions": ["<前提条件>"] },
+  "where":  { "scenario": "<环境>", "audience": "<受众>" },
+  "why":    "<因果链 + 为什么选这个而非替代方案>",
+  "how":    { "summary": "<一行可执行规则>", "detail": "<展开步骤>" },
+  "result": { "expected_outcome": "<预期效果，尽量量化>" },
+  "not":    [{ "condition": "<何时不适用>", "effect": "skip|modify|warn", "reason": "<原因>" }]
 }
-EOF
-node SPARKER/index.js kindle --file=/tmp/spark_tn.json
 ```
 
-### human_feedback (user corrects output)
-```bash
-cat > /tmp/spark_hf.json << 'EOF'
+**采火前检查**：WHEN 有触发条件？WHERE 有场景？WHY 有因果链？HOW 可执行？RESULT 有预期？NOT 有例外？全部齐了才 kindle。
+
+---
+
+## 好 vs 差的火种
+
+**差**（鹦鹉学舌）：
+```json
+{ "how": { "summary": "用户说水温要高一点" }, "why": "" }
+```
+问题：没 domain、没 trigger、没 why、没边界、只是复述原话。
+
+**好**（蒸馏后的经验）：
+```json
 {
   "source": "human_feedback",
-  "domain": "<domain>",
+  "domain": "手冲咖啡.冲煮参数",
   "knowledge_type": "rule",
-  "when": { "trigger": "<what you were doing>", "conditions": ["<context>"] },
-  "where": { "scenario": "<environment>" },
-  "why": "<why the correction matters>",
-  "how": { "summary": "<corrected rule>", "detail": "<expanded explanation>" },
-  "result": { "expected_outcome": "<improvement>" },
-  "not": [{ "condition": "<exception>", "effect": "skip", "reason": "<why>" }]
+  "when": { "trigger": "调整手冲水温", "conditions": ["浅烘焙豆"] },
+  "where": { "scenario": "家用手冲", "audience": "咖啡爱好者" },
+  "why": "浅烘豆质硬密度大，需高温充分萃取；低温导致萃取不足发酸",
+  "how": { "summary": "浅烘焙手冲水温 92-96°C", "detail": "沸水静置 30s（~95°C），闷蒸 96°C，注水 92-94°C" },
+  "result": { "expected_outcome": "充分萃取花果香，避免尖酸" },
+  "not": [{ "condition": "深烘焙", "effect": "modify", "reason": "深烘应降到 85-90°C 避免苦涩" }]
 }
-EOF
-node SPARKER/index.js kindle --file=/tmp/spark_hf.json
 ```
 
-### casual_mining (casual expertise sharing)
+---
+
+## Kindle 模板
+
+写入临时文件然后 kindle：
 ```bash
-cat > /tmp/spark_cm.json << 'EOF'
-{
-  "source": "casual_mining",
-  "domain": "<domain>",
-  "knowledge_type": "preference",
-  "when": { "trigger": "<relevant scenario>", "conditions": ["<context>"] },
-  "where": { "scenario": "<environment>", "audience": "<target>" },
-  "why": "<reasoning>",
-  "how": { "summary": "<the insight>" },
-  "result": { "expected_outcome": "<benefit>" },
-  "not": [{ "condition": "<exception>", "effect": "skip", "reason": "<why>" }]
-}
+cat > /tmp/spark_<ts>.json << 'EOF'
+{ 上面的六维 JSON }
 EOF
-node SPARKER/index.js kindle --file=/tmp/spark_cm.json
+node SPARKER/index.js kindle --file=/tmp/spark_<ts>.json
 ```
 
-### iterative_refinement (multi-round synthesis)
-```bash
-cat > /tmp/spark_ir.json << 'EOF'
-{
-  "source": "iterative_refinement",
-  "domain": "<domain>",
-  "knowledge_type": "pattern",
-  "corrections": [
-    {"summary": "<round 1 correction>"},
-    {"summary": "<round 2 correction>"},
-    {"summary": "<round 3 correction>"}
-  ],
-  "when": { "trigger": "<task>", "conditions": ["<context>"] },
-  "where": { "scenario": "<environment>" },
-  "why": "<synthesized reasoning from all rounds>",
-  "how": {
-    "summary": "<combined actionable rule>",
-    "detail": "<step-by-step from all corrections>"
-  },
-  "result": { "expected_outcome": "<final outcome>" }
-}
-EOF
-node SPARKER/index.js kindle --file=/tmp/spark_ir.json
-```
+---
 
-### micro_probe (agent probes, user answers)
-```bash
-cat > /tmp/spark_mp.json << 'EOF'
-{
-  "source": "micro_probe",
-  "domain": "<domain>",
-  "knowledge_type": "boundary",
-  "confidence": 0.40,
-  "confirmation_status": "human_confirmed",
-  "when": { "trigger": "<scenario>", "conditions": ["<qualifying condition>"] },
-  "where": { "scenario": "<environment>" },
-  "why": "<reasoning from user's answer>",
-  "how": { "summary": "<the boundary rule>" },
-  "result": { "expected_outcome": "<effect>" },
-  "not": [{ "condition": "<exception>", "effect": "skip", "reason": "<why>" }]
-}
-EOF
-node SPARKER/index.js kindle --file=/tmp/spark_mp.json
-```
+## 搜索查询构造
 
-## Domain Naming
+**差**（裸关键词）：`"咖啡拉花"` `"API设计"` `"直播标题"`
 
-- Use the user's language for domain names
-- Dot-separated sub-domains: e.g., `咖啡烘焙.生豆选择`
-- Consistency: all sparks in the same domain share the same root
+**好**（带场景上下文）：`"咖啡拉花 写实风格 图片生成 线条圆润"` `"低客单价美妆 电商直播标题 紧迫感"`
+
+模板：`"<主题> <场景/受众> <动作/阶段> <关键约束>"`
+
+---
+
+## 领域命名
+
+- 用用户的语言命名（中文用户 → 中文领域）
+- 点分隔子领域：`咖啡烘焙.生豆选择`、`后端开发.API设计`
+- 同领域所有火种共享同一根领域名

@@ -1,87 +1,37 @@
-# Digest + Retrospective + Review + Transmit Protocol
+# 复盘协议（Digest + 回溯 + 审核 + 传火）
 
-The full digest cycle has 4 sequential steps.
-
-## Step 1: Run Digest
+## 执行
 
 ```
 exec: node SPARKER/index.js digest
 ```
 
-This runs: retrospective analysis → refinement pipeline → decay → update capability map.
+自动完成：回溯分析 → 提炼晋升 → 置信度衰减 → 能力图谱更新。
 
-## Step 2: Present Retrospective Discoveries (MANDATORY if any found)
+## 必须展示回溯发现
 
-**If `retrospective.sparks_extracted > 0`**, you MUST proactively present discoveries FIRST:
+如果 `retrospective.sparks_extracted > 0`，**必须主动告诉用户**：
 
-```
-🔍 Retrospective Analysis
-
-I reviewed {sessions_analyzed} recent conversations and discovered {sparks_extracted} insights
-I missed during our chats:
-
-1. [{domain}] {summary}
-   Signal: {signal_type} | Confidence: {confidence}
-   Evidence: "{evidence snippet}"
-
-2. [{domain}] {summary}
-   Signal: {signal_type} | Confidence: {confidence}
-   Evidence: "{evidence snippet}"
-
-These are marked as pending verification. Please confirm, correct, or dismiss:
-→ [Confirm all] [Review each] [Dismiss all]
-```
-
-If user confirms a retrospective spark, kindle a reinforcement to upgrade it:
-```
-exec: echo '{"source":"human_feedback","domain":"<domain>","knowledge_type":"<type>","when":{"trigger":"<trigger>"},"why":"User confirmed retrospective discovery","how":{"summary":"<original>","detail":"Confirmed during digest review"},"result":{"expected_outcome":"Confidence upgraded from retrospective"}}' | node SPARKER/index.js kindle
-```
-
-If user corrects a retrospective spark, kindle the corrected version instead.
-If user dismisses, no action needed (spark stays at low confidence and will decay).
-
-## Step 3: Present Refinement Results
-
-After retrospective review, present the main digest report:
-
-```
-📊 Learning Review
-
-This cycle: {N} raw sparks across {M} domains.
-Refined into {K} sparks:
-
-1. [{domain}] {summary}
-   Sources: {evidence_count} raw sparks | Credibility: {credibility}
-   Core rule: {heuristic}
-
-2. [{domain}] {summary}
-   ...
-
-Capability map changes:
-- {domain_A}: learning → proficient ⬆
-- {domain_B}: new blind spot ⚠
-
-{If at-risk sparks exist (credibility < 0.35 from human_confirmed):}
-⚠️ These sparks are decaying due to disuse. Still valid?
-- [{domain}] "{heuristic}" → [Still valid] [Outdated]
-```
-
-If user confirms at-risk sparks are still valid, kindle a reinforcement spark:
-```
-exec: echo '{"source":"human_feedback","domain":"<domain>","knowledge_type":"<type>","when":{"trigger":"<original>"},"why":"User confirmed still valid during periodic review","how":{"summary":"<original>","detail":"User confirmed validity during review"},"result":{"expected_outcome":"Credibility restored"}}' | node SPARKER/index.js kindle
-```
-
-## Step 4: Propose Transmit (Publish to SparkHub)
-
-If new RefinedSparks have credibility >= 0.50, ask the user:
-
-> "This digest produced {K} refined sparks. {N} of them are high quality — want to publish them to SparkHub so other agents can benefit?"
+> 🔍 回顾最近的对话，我发现了 {N} 条之前遗漏的知识：
+> 1. [{领域}] {摘要} — {信号类型}
+> 2. [{领域}] {摘要} — {信号类型}
 >
-> 1. [{domain}] "{summary}" — credibility {score}
-> 2. [{domain}] "{summary}" — credibility {score}
+> 标记为待验证。要确认、修正还是忽略？
+
+用户确认 → kindle 一条强化火种升级置信度。
+用户纠正 → kindle 纠正后的版本。
+用户忽略 → 不操作（低置信度会自然衰减）。
+
+## 展示提炼结果
+
+> 📊 本轮复盘：{N} 条原始火种，提炼出 {K} 条精华：
+> 1. [{领域}] {规则摘要} — 置信度 {score}
 >
-> [Publish all] [Review each] [Skip]
+> 能力变化：{领域A} 入门→熟练 ⬆ / {领域B} 新盲区 ⚠
+>
+> ⚠️ 这些经验因长期未用正在衰退，还有效吗？
+> - [{领域}] "{规则}" → [还有效] [已过时]
 
-If user agrees, follow the publish workflow in `references/hub-publish-protocol.md`.
+## 提议发布
 
-**Key principle:** User confirmation during review IS the validation. Do NOT auto-publish without consent.
+新精华置信度 >= 0.50 时，问用户要不要发到 SparkHub。同意则按 `references/hub-publish-protocol.md` 执行。

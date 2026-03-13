@@ -1,37 +1,23 @@
-# Cold Start Protocol
+# 冷启动协议
 
-When the agent encounters a **new domain** (not in capability_map or status is `blind_spot`), follow these phases:
+新领域（不在 capability_map 中或状态为 `blind_spot`）时执行。
 
-## Phase 1: Identify & Register
+## 流程
 
-1. Run `plan <domain> "<goal>"` — register the domain in capability_map
-2. Run `status` — confirm current state (should be empty or blind_spot)
-3. Run `search "<domain>"` — check if SparkHub has existing sparks
+1. `exec: node SPARKER/index.js plan <domain> "<goal>"` — 注册领域
+2. `exec: node SPARKER/index.js status` — 确认状态
+3. `exec: node SPARKER/index.js search "<domain>" --hub` — 搜索社区已有经验
+4. 向用户汇报搜索发现，问从哪个子领域开始
+5. 用户说"教你" → `exec: node SPARKER/index.js teach <domain>` → 进入结构化萃取
 
-## Phase 2: Autonomous Research
+## 阶段行为
 
-- Search the web for domain overview
-- Decompose into sub-skill tree (P0 core / P1 advanced / P2 business)
-- Kindle search results with `web_exploration` source
+| 行为 | cold_start | active | cruise |
+|------|-----------|--------|--------|
+| 搜索积极度 | 积极 | 平衡 | 按需 |
+| 追问预算 | 3 次/对话 | 2 次 | 1 次 |
+| 归因频率 | 无（还没经验） | 适度 | 仅高置信度 |
 
-## Phase 3: Enter Teaching
+## 退出条件
 
-- Report research findings to the user
-- Ask which sub-domain to start with
-- If user says "let me teach you", enter `teach` structured extraction mode
-
-## Behavior by Phase
-
-| Behavior | cold_start | active | cruise |
-|----------|-----------|--------|--------|
-| Search aggressiveness | Aggressive | Balanced | On-demand |
-| Question frequency | High (3/interaction) | Medium (2/interaction) | Low (1/interaction) |
-| Attribution frequency | None (no knowledge yet) | Moderate | High-confidence only |
-| Micro-probe budget | 3/interaction | 2/interaction | 1/interaction |
-
-## Exit Conditions
-
-Exit cold_start → enter `active` when ANY of:
-- Domain spark_count >= 5
-- Domain practice_count >= 2
-- User explicitly says foundational teaching is done
+满足任一即从 cold_start → active：领域火种 >= 5 / 实践次数 >= 2 / 用户明确说基础教学结束。

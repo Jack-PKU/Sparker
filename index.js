@@ -4,7 +4,7 @@
 // Usage: node index.js <command> --file=<json_path> [options]
 //    or: echo '<json>' | node index.js <command> [options]
 // Commands: kindle, teach, digest, search, publish, forge, crystallize, ingest, profile, review,
-//           status, plan, post-task, report, strategy, login, register, bind, whoami, hub-url
+//           status, plan, post-task, report, strategy, login, register, bind, unbind, whoami, hub-url
 
 var fs = require('fs');
 var path = require('path');
@@ -675,8 +675,33 @@ async function handleWhoami(args) {
     var validation = await validateBindingKey();
     identity.hub_reachable = validation.ok || validation.reachable || false;
     identity.validation = validation;
+    if (validation.binding_cleared) {
+      identity = getIdentity();
+      identity.hub_reachable = validation.reachable || false;
+      identity.validation = validation;
+    }
   }
   console.log(JSON.stringify(identity));
+}
+
+async function handleUnbind() {
+  var { unbindFromHub, getIdentity } = require('./src/transmit/auth');
+
+  var before = getIdentity();
+  if (!before.bound) {
+    console.log(JSON.stringify({ ok: true, message: 'Already unbound', identity: before }));
+    return;
+  }
+
+  var result = await unbindFromHub();
+  var after = getIdentity();
+  console.log(JSON.stringify({
+    ok: result.ok,
+    message: result.message,
+    already_unbound: result.already_unbound || false,
+    network_error: result.network_error || false,
+    identity: after,
+  }));
 }
 
 function handleHubUrl(args) {
@@ -859,6 +884,9 @@ async function main() {
     case 'whoami':
       await handleWhoami(args);
       break;
+    case 'unbind':
+      await handleUnbind();
+      break;
     case 'daily-report':
       await handleDailyReport();
       break;
@@ -880,6 +908,7 @@ async function main() {
       process.stderr.write('  login       Login to SparkLand and obtain binding key\n');
       process.stderr.write('  register    Register a new SparkLand account (invite required)\n');
       process.stderr.write('  bind <key>  Save a binding key locally\n');
+      process.stderr.write('  unbind      Unbind from SparkLand (clears local + server binding)\n');
       process.stderr.write('  whoami      Show current identity (node_id, agent, hub status)\n');
       process.stderr.write('  hub-url     Show or set SparkLand URL\n\n');
       process.stderr.write('Knowledge:\n');

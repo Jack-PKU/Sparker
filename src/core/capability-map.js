@@ -182,54 +182,30 @@ function formatCapabilityReport(capMap) {
     return '\uD83E\uDDE0 \u80FD\u529B\u56FE\u8C31\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\u8FD8\u6CA1\u6709\u4EFB\u4F55\u9886\u57DF\u7ECF\u9A8C\uFF0C\u5F00\u59CB\u548C\u6211\u804A\u5929\u5427\uFF01';
   }
 
-  var groups = { mastered: [], proficient: [], learning: [], blind_spot: [] };
+  var items = [];
   for (var i = 0; i < names.length; i++) {
-    var n = names[i];
-    var d = domains[n];
-    var s = d.status || 'blind_spot';
-    if (!groups[s]) groups[s] = [];
-    groups[s].push({ name: n, data: d });
+    var d = domains[names[i]];
+    var sparkCount = (d.spark_count || 0) + (d.refined_count || 0);
+    items.push({ name: names[i], count: sparkCount });
   }
-  for (var g in groups) {
-    groups[g].sort(function(a, b) { return (b.data.score || 0) - (a.data.score || 0); });
-  }
-
-  var counts = {};
-  var total = names.length;
-  for (var gk in groups) counts[gk] = groups[gk].length;
+  items.sort(function(a, b) { return b.count - a.count; });
 
   var maxNameWidth = 0;
-  for (var ni = 0; ni < names.length; ni++) {
-    var w = displayWidth(names[ni]);
+  var maxCount = 0;
+  for (var ni = 0; ni < items.length; ni++) {
+    var w = displayWidth(items[ni].name);
     if (w > maxNameWidth) maxNameWidth = w;
+    if (items[ni].count > maxCount) maxCount = items[ni].count;
   }
   var COL = Math.max(maxNameWidth, 6) + 2;
+  var BAR_W = 20;
 
   var lines = [];
-  var BAR_W = 20;
-  var groupOrder = ['mastered', 'proficient', 'learning', 'blind_spot'];
-  var GROUP_LABELS = {
-    mastered: '\u7CBE\u901A',
-    proficient: '\u719F\u7EC3',
-    learning: '\u5B66\u4E60\u4E2D',
-    blind_spot: '\u76F2\u533A',
-  };
-
-  for (var gi = 0; gi < groupOrder.length; gi++) {
-    var gKey = groupOrder[gi];
-    var items = groups[gKey];
-    if (items.length === 0) continue;
-
-    lines.push(GROUP_LABELS[gKey] + '\uFF1A');
-
-    for (var ii = 0; ii < items.length; ii++) {
-      var item = items[ii];
-      var score = item.data.score || 0;
-      var bar = makeBar(score, BAR_W);
-      var pct = formatPercentage(score);
-      lines.push('  ' + padEnd(item.name, COL) + bar + ' ' + pct);
-    }
-    lines.push('');
+  for (var ii = 0; ii < items.length; ii++) {
+    var item = items[ii];
+    var ratio = maxCount > 0 ? item.count / maxCount : 0;
+    var bar = makeBar(ratio, BAR_W);
+    lines.push('  ' + padEnd(item.name, COL) + bar + ' ' + item.count + ' \u6761');
   }
 
   return lines.join('\n');

@@ -174,6 +174,17 @@ async function httpTransportSend(message) {
     checkUpdateHeader(res);
     var data = await res.json();
     var result = { ok: res.ok, status: res.status, response: data };
+
+    if (res.status === 401 && data && data.error === 'binding_key_invalid') {
+      var { clearBinding } = require('./auth');
+      clearBinding();
+      result.binding_cleared = true;
+      result.error = 'binding_key_invalid';
+      process.stderr.write(
+        '[sparker] 绑定密钥无效或已被解绑，本地绑定已清除。请重新绑定到 SparkLand。\n'
+      );
+    }
+
     if (res.headers.get('x-sparker-update-available') === 'true') {
       result.update_available = {
         latest: res.headers.get('x-sparker-latest-version'),
@@ -207,6 +218,9 @@ async function hubSearch(query, opts) {
   var result = await httpTransportSend(message);
 
   if (!result.ok) {
+    if (result.binding_cleared) {
+      return { ok: false, error: 'binding_key_invalid', binding_cleared: true, results: [] };
+    }
     if (result.status === 402) {
       var errResp = result.response || {};
       return {

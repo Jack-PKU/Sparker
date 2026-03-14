@@ -37,6 +37,15 @@ function saveBindingKey(key) {
   writeConfig(cfg);
 }
 
+function clearBinding() {
+  var cfg = readConfig();
+  delete cfg.binding_key;
+  delete cfg.bound_at;
+  cfg.binding_status = 'unbound';
+  cfg.unbound_at = new Date().toISOString();
+  writeConfig(cfg);
+}
+
 function getAgentName() {
   return process.env.STP_AGENT_NAME
     || process.env.AGENT_NAME
@@ -100,11 +109,20 @@ async function loginToHub(email, password) {
 
     saveBindingKey(bindData.binding_key);
 
+    // Immediately register this agent (node_id) with the hub so it appears
+    // in the user's agent list right away instead of waiting for first A2A use.
+    var registered = false;
+    try {
+      var regResult = await validateBindingKey();
+      registered = !!(regResult.ok && regResult.valid);
+    } catch (e) { /* best-effort — will register on first A2A request */ }
+
     return {
       ok: true,
       binding_key: bindData.binding_key,
       user_id: loginData.user ? loginData.user.id : null,
       email: loginData.user ? loginData.user.email : email,
+      registered: registered,
     };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -148,31 +166,78 @@ function getIdentity() {
   };
 }
 
-// Validate binding key against hub — checks if the key is still valid
+// Validate binding key against hub via /spark/validate_binding endpoint.
+// Auto-clears local binding when the server reports the key is deleted/invalid.
 async function validateBindingKey() {
   var hubUrl = getHubUrl();
   var bk = getBindingKey();
   if (!hubUrl || !bk) return { ok: false, error: 'not_configured' };
 
   try {
-    var res = await fetch(hubUrl.replace(/\/+$/, '') + '/health', {
-      method: 'GET',
-      headers: { 'X-Sparkland-Binding-Key': bk },
+    var res = await fetch(hubUrl.replace(/\/+$/, '') + '/spark/validate_binding', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Sparkland-Binding-Key': bk,
+        'X-Node-Id': getNodeId(),
+      },
       signal: AbortSignal.timeout(5000),
     });
-    if (res.ok) {
-      return { ok: true, reachable: true };
+    var data = await res.json();
+
+    if (res.ok && data.valid) {
+      return { ok: true, reachable: true, valid: true };
     }
+
+    if (data.error === 'binding_key_invalid' || data.binding_deleted) {
+      clearBinding();
+      return { ok: false, error: 'binding_key_invalid', binding_cleared: true };
+    }
+
     if (res.status === 401 || res.status === 403) {
-      var cfg = readConfig();
-      cfg.binding_status = 'invalid';
-      cfg.binding_checked_at = new Date().toISOString();
-      writeConfig(cfg);
-      return { ok: false, error: 'binding_key_invalid', status: res.status };
+      return { ok: false, error: data.error || 'auth_failed', status: res.status };
     }
+
     return { ok: true, reachable: true };
   } catch (err) {
     return { ok: false, error: 'network_error', message: err.message };
+  }
+}
+
+// Agent-initiated unbind: tell the hub to delete the binding, then clear local state.
+async function unbindFromHub() {
+  var hubUrl = getHubUrl();
+  var bk = getBindingKey();
+
+  if (!bk) {
+    return { ok: true, message: 'Already unbound (no local binding key)' };
+  }
+
+  if (!hubUrl) {
+    clearBinding();
+    return { ok: true, message: 'Local binding cleared (no hub configured)' };
+  }
+
+  try {
+    var res = await fetch(hubUrl.replace(/\/+$/, '') + '/spark/agent_unbind', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Sparkland-Binding-Key': bk,
+        'X-Node-Id': getNodeId(),
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+    var data = await res.json();
+    clearBinding();
+    return {
+      ok: true,
+      message: 'Successfully unbound from SparkLand',
+      already_unbound: data && data.payload ? data.payload.already_unbound : false,
+    };
+  } catch (err) {
+    clearBinding();
+    return { ok: true, message: 'Local binding cleared (hub unreachable: ' + err.message + ')', network_error: true };
   }
 }
 
@@ -196,6 +261,7 @@ function handleConsumeRejection(responseData) {
 module.exports = {
   getBindingKey,
   saveBindingKey,
+  clearBinding,
   getAgentName,
   saveAgentName,
   getHubUrl,
@@ -204,6 +270,7 @@ module.exports = {
   registerOnHub,
   getIdentity,
   validateBindingKey,
+  unbindFromHub,
   handleConsumeRejection,
   readConfig,
   writeConfig,

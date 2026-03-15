@@ -60,8 +60,33 @@ function generateId(prefix) {
 
 function getNodeId() {
   if (process.env.STP_NODE_ID) return String(process.env.STP_NODE_ID);
-  var raw = (process.env.AGENT_NAME || 'default') + '|' + process.cwd();
-  return 'node_' + crypto.createHash('sha256').update(raw).digest('hex').slice(0, 12);
+
+  // Read persisted node_id from config — avoids instability when cwd changes between sessions
+  var configPath = require('path').join(
+    process.env.HOME || process.env.USERPROFILE || '/root',
+    '.openclaw', 'sparkhub.json'
+  );
+  try {
+    var cfg = JSON.parse(require('fs').readFileSync(configPath, 'utf8'));
+    if (cfg.node_id) return cfg.node_id;
+  } catch (e) { /* first run or missing config */ }
+
+  // Generate stable node_id from skill root (dirname of this file is always the same)
+  var skillRoot = require('path').resolve(__dirname, '..', '..');
+  var raw = (process.env.AGENT_NAME || 'default') + '|' + skillRoot;
+  var nodeId = 'node_' + crypto.createHash('sha256').update(raw).digest('hex').slice(0, 12);
+
+  // Persist it so it never changes
+  try {
+    var dir = require('path').dirname(configPath);
+    if (!require('fs').existsSync(dir)) require('fs').mkdirSync(dir, { recursive: true });
+    var existing = {};
+    try { existing = JSON.parse(require('fs').readFileSync(configPath, 'utf8')); } catch (e) {}
+    existing.node_id = nodeId;
+    require('fs').writeFileSync(configPath, JSON.stringify(existing, null, 2), 'utf8');
+  } catch (e) { /* best-effort */ }
+
+  return nodeId;
 }
 
 module.exports = {

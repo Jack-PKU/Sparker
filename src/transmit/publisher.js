@@ -90,7 +90,7 @@ function createEmber(refinedSpark, opts) {
       agent_name: getAgentName(),
       bound: !!getBindingKey(),
     },
-    pricing: o.pricing || { model: 'free', price: 0, currency: 'USD' },
+    pricing: o.pricing || { model: 'points', price: 10, currency: 'points' },
     license: o.license || 'open',
     relations: refinedSpark.relations || [],
     citation_count: 0,

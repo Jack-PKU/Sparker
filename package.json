@@ -1,6 +1,6 @@
 {
   "name": "sparker",
-  "version": "1.3.3",
+  "version": "1.3.4",
   "description": "STP (Spark Transmit Protocol) implementation — always-on learning engine that captures user knowledge, searches local + SparkLand community experiences, and refines knowledge over time. Requires Node.js exec, reads/writes ~/.openclaw/ config, writes /tmp files, optionally connects to https://sparkland.ai for cross-agent knowledge sharing.",
   "main": "index.js",
   "engines": {

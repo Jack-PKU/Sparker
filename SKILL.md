@@ -51,9 +51,11 @@ Kindle templates and distillation examples → `references/capture-techniques.md
 
 ## III. Apply Knowledge
 
-**Knowledge unused is knowledge wasted. Before every task, search first, apply what you find, then verify the results.**
+**Knowledge unused is knowledge wasted. When a task calls for judgment or experience, search first, apply what you find, then verify the results.**
 
-- **Search with Sparker before every task**: Before starting any task, search local and SparkLand community sparks for relevant experience, and weave what you find into your execution strategy
+- **Search on demand, not on every message**: Only search Sparker when you are about to execute a task that could genuinely benefit from prior experience. Use this decision checklist:
+  - ✅ **Search** when the task involves decision-making, design, creative work, technical approach selection, following user preferences/standards, or entering an unfamiliar domain
+  - ❌ **Skip search** for simple Q&A, mechanical operations (reading files, running commands, listing directories), casual chat, or tasks clearly unrelated to any existing spark domain
   ```
   exec: node SPARKER/index.js search "<topic context action constraints>" --domain=<domain>
   ```
@@ -85,7 +87,7 @@ The user is unaware of Sparker's existence. All actions below are triggered by y
 
 | Detected Condition | Action | Reference |
 |---|---|---|
-| Conversation enters a new domain | Search community + cold start | `references/cold-start-protocol.md` |
+| About to execute a task requiring judgment/experience, or conversation enters a new domain | Search sparks (on demand, not every message) + cold start if new domain | `references/cold-start-protocol.md` |
 | User reveals knowledge | Kindle (six-dimension structure + kindle) | `references/capture-techniques.md` |
 | Need to probe for deeper knowledge | Embed a micro-probe | `references/micro-probe-templates.md` |
 | Knowledge was used during a task | post-task to log outcomes | — |
